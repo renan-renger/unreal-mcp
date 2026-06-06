@@ -70,14 +70,14 @@ namespace
     // that look like MSVC compiler diagnostics.  MSVC writes errors and warnings in the
     // form  "file(line): error/warning/fatal error CNNNN: ..."  which is a well-known
     // public format, independent of any specific engine implementation.
-    FString CollectUBTDiagnostics(const FString& LogPath, const FDateTime& TimestampBefore)
+    FString CollectUBTDiagnostics(const FString& UBTLogFilePath, const FDateTime& TimestampBefore)
     {
-        const FDateTime TimestampAfter = IFileManager::Get().GetTimeStamp(*LogPath);
+        const FDateTime TimestampAfter = IFileManager::Get().GetTimeStamp(*UBTLogFilePath);
         if (TimestampAfter == FDateTime::MinValue() || TimestampAfter == TimestampBefore)
             return FString();
 
         FString LogContent;
-        if (!FFileHelper::LoadFileToString(LogContent, *LogPath))
+        if (!FFileHelper::LoadFileToString(LogContent, *UBTLogFilePath))
             return FString();
 
         TArray<FString> AllLines;
@@ -534,8 +534,8 @@ void FMCPythonTcpServer::HandleLiveCodingCompile(TSharedPtr<FJsonObject> JsonObj
     const FString UBTLogPath = FPaths::Combine(FPaths::EngineDir(), TEXT("Programs"), TEXT("UnrealBuildTool"), TEXT("Log.txt"));
     const FDateTime UBTLogTimestampBefore = IFileManager::Get().GetTimeStamp(*UBTLogPath);
 
-    FMCPCompileLogCapture LogCapture;
-    GLog->AddOutputDevice(&LogCapture);
+    FMCPCompileLogCapture CompileCapture;
+    GLog->AddOutputDevice(&CompileCapture);
 
     UE_LOG(LogMCPython, Log, TEXT("LiveCoding compile started (WaitForCompletion)..."));
     const double StartTime = FPlatformTime::Seconds();
@@ -543,7 +543,7 @@ void FMCPythonTcpServer::HandleLiveCodingCompile(TSharedPtr<FJsonObject> JsonObj
     ELiveCodingCompileResult CompileResult = ELiveCodingCompileResult::NotStarted;
     const bool bStarted = LiveCoding->Compile(ELiveCodingCompileFlags::WaitForCompletion, &CompileResult);
 
-    GLog->RemoveOutputDevice(&LogCapture);
+    GLog->RemoveOutputDevice(&CompileCapture);
 
     const double ElapsedTime = FPlatformTime::Seconds() - StartTime;
     const bool bSuccess = bStarted &&
@@ -585,7 +585,7 @@ void FMCPythonTcpServer::HandleLiveCodingCompile(TSharedPtr<FJsonObject> JsonObj
     Response->SetStringField(TEXT("message"), Message);
     Response->SetNumberField(TEXT("elapsed_seconds"), ElapsedTime);
 
-    const FString CapturedLog = LogCapture.GetAndClear();
+    const FString CapturedLog = CompileCapture.GetAndClear();
     if (!CapturedLog.IsEmpty())
         Response->SetStringField(TEXT("compile_output"), CapturedLog);
 
