@@ -9,6 +9,9 @@ Saved/
 # VS and Rider IDE
 .vscode/
 .idea/
+
+# Claude Code local settings
+.claude/
 *.sln
 *.suo
 *.opensdf
@@ -53,6 +56,11 @@ Script/
 *.gen.*
 *.generated.cpp
 *.generated.h
+
+# Sample project generated files
+Binaries/
+Intermediate/
+Saved/
 
 # Ignore precompiled headers and auto-generated code
 *.pch

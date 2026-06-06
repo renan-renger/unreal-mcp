@@ -32,7 +32,7 @@ jobs:
           # Extract VersionName from .uplugin (JSON)
           UPLUGIN_VER=$(python3 -c "
           import json, sys
-          with open('UnrealMCPython.uplugin') as f:
+          with open('Plugins/UnrealMCPython/UnrealMCPython.uplugin') as f:
               data = json.load(f)
           print(data['VersionName'])
           ")
@@ -80,14 +80,14 @@ jobs:
           mkdir -p "$TARGET"
 
           # Copy included directories
-          for dir in Source Content Config Resources Docs mcp-server; do
+          for dir in Plugins Docs mcp-server; do
             if [ -d "$dir" ]; then
               cp -r "$dir" "$TARGET/"
             fi
           done
 
           # Copy included files
-          for file in UnrealMCPython.uplugin README.md LICENSE.txt .gitignore; do
+          for file in README.md LICENSE.txt; do
             if [ -f "$file" ]; then
               cp "$file" "$TARGET/"
             fi
