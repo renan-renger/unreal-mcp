@@ -19,25 +19,35 @@ DEFINE_LOG_CATEGORY_STATIC(LogMCPython, Log, All);
 
 namespace
 {
-    /** Captures LogLiveCoding category output during compilation (worker-thread safe). */
-    class FLiveCodingOutputCollector : public FOutputDevice
+    // Accumulates lines emitted under the LogLiveCoding log category while a live
+    // coding compile runs. Live Coding dispatches compiler output from worker threads,
+    // so Serialize must be callable from any thread.
+    class FMCPCompileLogCapture : public FOutputDevice
     {
     public:
-        virtual void Serialize(const TCHAR* V, ELogVerbosity::Type Verbosity, const FName& Category) override
+        virtual void Serialize(const TCHAR* Message, ELogVerbosity::Type Verbosity, const FName& Category) override
         {
-            static const FName LiveCodingCategory(TEXT("LogLiveCoding"));
-            if (Category != LiveCodingCategory)
+            static const FName TargetCategory(TEXT("LogLiveCoding"));
+            if (Category != TargetCategory)
                 return;
-            FScopeLock Lock(&CS);
-            if (!Output.IsEmpty())
-                Output += TEXT("\n");
-            Output += V;
+            FScopeLock Guard(&LineLock);
+            CapturedLines.Add(FString(Message));
         }
+
         virtual bool CanBeUsedOnAnyThread() const override { return true; }
-        FString ConsumeOutput() { FScopeLock Lock(&CS); return MoveTemp(Output); }
+
+        // Returns all captured lines joined by newlines and clears the buffer.
+        FString GetAndClear()
+        {
+            FScopeLock Guard(&LineLock);
+            FString Result = FString::Join(CapturedLines, TEXT("\n"));
+            CapturedLines.Reset();
+            return Result;
+        }
+
     private:
-        FCriticalSection CS;
-        FString Output;
+        FCriticalSection LineLock;
+        TArray<FString> CapturedLines;
     };
 
     FString LCCompileResultToString(ELiveCodingCompileResult Result)
@@ -55,22 +65,36 @@ namespace
         }
     }
 
-    /** Extract MSVC error/warning lines from UBT Log.txt content. */
-    FString ExtractMSVCDiagnostics(const FString& LogText)
+    // Reads UBT's Log.txt if it was written during this compile (detected by comparing
+    // the file's modification time before and after the compile call) and returns lines
+    // that look like MSVC compiler diagnostics.  MSVC writes errors and warnings in the
+    // form  "file(line): error/warning/fatal error CNNNN: ..."  which is a well-known
+    // public format, independent of any specific engine implementation.
+    FString CollectUBTDiagnostics(const FString& LogPath, const FDateTime& TimestampBefore)
     {
-        FString Diagnostics;
-        TArray<FString> Lines;
-        LogText.ParseIntoArrayLines(Lines);
-        for (const FString& Line : Lines)
+        const FDateTime TimestampAfter = IFileManager::Get().GetTimeStamp(*LogPath);
+        if (TimestampAfter == FDateTime::MinValue() || TimestampAfter == TimestampBefore)
+            return FString();
+
+        FString LogContent;
+        if (!FFileHelper::LoadFileToString(LogContent, *LogPath))
+            return FString();
+
+        TArray<FString> AllLines;
+        LogContent.ParseIntoArrayLines(AllLines, /*bCullEmpty=*/true);
+
+        TArray<FString> DiagnosticLines;
+        for (const FString& Line : AllLines)
         {
-            if (Line.Contains(TEXT("): error ")) || Line.Contains(TEXT("): warning ")) || Line.Contains(TEXT("): fatal error ")))
-            {
-                if (!Diagnostics.IsEmpty())
-                    Diagnostics += TEXT("\n");
-                Diagnostics += Line;
-            }
+            // Match the standard MSVC diagnostic format: path(row,col): severity CXXXX:
+            const bool bError   = Line.Contains(TEXT("): error "));
+            const bool bFatal   = Line.Contains(TEXT("): fatal error "));
+            const bool bWarning = Line.Contains(TEXT("): warning "));
+            if (bError || bFatal || bWarning)
+                DiagnosticLines.Add(Line);
         }
-        return Diagnostics;
+
+        return FString::Join(DiagnosticLines, TEXT("\n"));
     }
 }
 
@@ -507,13 +531,11 @@ void FMCPythonTcpServer::HandleLiveCodingCompile(TSharedPtr<FJsonObject> JsonObj
         return;
     }
 
-    // Snapshot UBT Log.txt timestamp before compile so we can detect a fresh log later.
     const FString UBTLogPath = FPaths::Combine(FPaths::EngineDir(), TEXT("Programs"), TEXT("UnrealBuildTool"), TEXT("Log.txt"));
     const FDateTime UBTLogTimestampBefore = IFileManager::Get().GetTimeStamp(*UBTLogPath);
 
-    // Capture LogLiveCoding output (compiler/linker lines) during compilation.
-    FLiveCodingOutputCollector OutputCollector;
-    GLog->AddOutputDevice(&OutputCollector);
+    FMCPCompileLogCapture LogCapture;
+    GLog->AddOutputDevice(&LogCapture);
 
     UE_LOG(LogMCPython, Log, TEXT("LiveCoding compile started (WaitForCompletion)..."));
     const double StartTime = FPlatformTime::Seconds();
@@ -521,7 +543,7 @@ void FMCPythonTcpServer::HandleLiveCodingCompile(TSharedPtr<FJsonObject> JsonObj
     ELiveCodingCompileResult CompileResult = ELiveCodingCompileResult::NotStarted;
     const bool bStarted = LiveCoding->Compile(ELiveCodingCompileFlags::WaitForCompletion, &CompileResult);
 
-    GLog->RemoveOutputDevice(&OutputCollector);
+    GLog->RemoveOutputDevice(&LogCapture);
 
     const double ElapsedTime = FPlatformTime::Seconds() - StartTime;
     const bool bSuccess = bStarted &&
@@ -531,7 +553,6 @@ void FMCPythonTcpServer::HandleLiveCodingCompile(TSharedPtr<FJsonObject> JsonObj
     UE_LOG(LogMCPython, Log, TEXT("LiveCoding compile finished in %.1fs: %s"),
         ElapsedTime, *LCCompileResultToString(CompileResult));
 
-    // Build human-readable message.
     FString Message;
     switch (CompileResult)
     {
@@ -564,27 +585,13 @@ void FMCPythonTcpServer::HandleLiveCodingCompile(TSharedPtr<FJsonObject> JsonObj
     Response->SetStringField(TEXT("message"), Message);
     Response->SetNumberField(TEXT("elapsed_seconds"), ElapsedTime);
 
-    // Attach captured LogLiveCoding output (error lines etc.) when available.
-    const FString CapturedOutput = OutputCollector.ConsumeOutput();
-    if (!CapturedOutput.IsEmpty())
-    {
-        Response->SetStringField(TEXT("compile_output"), CapturedOutput);
-    }
+    const FString CapturedLog = LogCapture.GetAndClear();
+    if (!CapturedLog.IsEmpty())
+        Response->SetStringField(TEXT("compile_output"), CapturedLog);
 
-    // Supplement with MSVC diagnostics from UBT Log.txt if the file was refreshed.
-    const FDateTime UBTLogTimestampAfter = IFileManager::Get().GetTimeStamp(*UBTLogPath);
-    if (UBTLogTimestampAfter != FDateTime::MinValue() && UBTLogTimestampAfter != UBTLogTimestampBefore)
-    {
-        FString LogContent;
-        if (FFileHelper::LoadFileToString(LogContent, *UBTLogPath))
-        {
-            const FString Diagnostics = ExtractMSVCDiagnostics(LogContent);
-            if (!Diagnostics.IsEmpty())
-            {
-                Response->SetStringField(TEXT("compiler_diagnostics"), Diagnostics);
-            }
-        }
-    }
+    const FString Diagnostics = CollectUBTDiagnostics(UBTLogPath, UBTLogTimestampBefore);
+    if (!Diagnostics.IsEmpty())
+        Response->SetStringField(TEXT("compiler_diagnostics"), Diagnostics);
 
     SendJsonResponse(Response, ClientSocket);
 }
