@@ -64,22 +64,20 @@ Unreal MCP connects AI assistants to the Unreal Editor through the [Model Contex
 
 ### Step 1 — Install the Plugin
 
-**Option A: Clone from GitHub (Recommended)**
+**Option A: Download from GitHub Releases (Recommended)**
 
-```bash
-cd YourProject/Plugins
-git clone https://github.com/GenOrca/unreal-mcp.git
-```
+Download the latest zip from [Releases](https://github.com/GenOrca/unreal-mcp/releases) and extract it anywhere. Then copy `Plugins/UnrealMCPython/` into your project's `Plugins/` folder:
 
 ```
 YourProject/
 └── Plugins/
-    └── unreal-mcp/
+    └── UnrealMCPython/
         ├── Source/
         ├── Content/
-        ├── mcp-server/        ← MCP server included
         └── UnrealMCPython.uplugin
 ```
+
+Keep the `mcp-server/` folder from the zip in a convenient location — you'll need its path in Step 3.
 
 **Option B: Install from [Fab](https://fab.com/s/aed5f75d50b2)**
 
