@@ -10,9 +10,69 @@
 #include "Serialization/JsonReader.h"
 #include "Dom/JsonObject.h"
 #include "ILiveCodingModule.h"
-#include "Containers/Ticker.h"
+#include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Misc/ScopeLock.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogMCPython, Log, All);
+
+namespace
+{
+    /** Captures LogLiveCoding category output during compilation (worker-thread safe). */
+    class FLiveCodingOutputCollector : public FOutputDevice
+    {
+    public:
+        virtual void Serialize(const TCHAR* V, ELogVerbosity::Type Verbosity, const FName& Category) override
+        {
+            static const FName LiveCodingCategory(TEXT("LogLiveCoding"));
+            if (Category != LiveCodingCategory)
+                return;
+            FScopeLock Lock(&CS);
+            if (!Output.IsEmpty())
+                Output += TEXT("\n");
+            Output += V;
+        }
+        virtual bool CanBeUsedOnAnyThread() const override { return true; }
+        FString ConsumeOutput() { FScopeLock Lock(&CS); return MoveTemp(Output); }
+    private:
+        FCriticalSection CS;
+        FString Output;
+    };
+
+    FString LCCompileResultToString(ELiveCodingCompileResult Result)
+    {
+        switch (Result)
+        {
+        case ELiveCodingCompileResult::Success:            return TEXT("Success");
+        case ELiveCodingCompileResult::NoChanges:          return TEXT("NoChanges");
+        case ELiveCodingCompileResult::Failure:            return TEXT("Failure");
+        case ELiveCodingCompileResult::CompileStillActive: return TEXT("CompileStillActive");
+        case ELiveCodingCompileResult::NotStarted:         return TEXT("NotStarted");
+        case ELiveCodingCompileResult::Cancelled:          return TEXT("Cancelled");
+        case ELiveCodingCompileResult::InProgress:         return TEXT("InProgress");
+        default:                                           return TEXT("Unknown");
+        }
+    }
+
+    /** Extract MSVC error/warning lines from UBT Log.txt content. */
+    FString ExtractMSVCDiagnostics(const FString& LogText)
+    {
+        FString Diagnostics;
+        TArray<FString> Lines;
+        LogText.ParseIntoArrayLines(Lines);
+        for (const FString& Line : Lines)
+        {
+            if (Line.Contains(TEXT("): error ")) || Line.Contains(TEXT("): warning ")) || Line.Contains(TEXT("): fatal error ")))
+            {
+                if (!Diagnostics.IsEmpty())
+                    Diagnostics += TEXT("\n");
+                Diagnostics += Line;
+            }
+        }
+        return Diagnostics;
+    }
+}
 
 // Helper function to convert FJsonValue to Python literal string
 FString ConvertJsonValueToPythonLiteral(const TSharedPtr<FJsonValue>& JsonVal)
@@ -447,61 +507,84 @@ void FMCPythonTcpServer::HandleLiveCodingCompile(TSharedPtr<FJsonObject> JsonObj
         return;
     }
 
-    ELiveCodingCompileResult CompileResult;
-    LiveCoding->Compile(ELiveCodingCompileFlags::None, &CompileResult);
+    // Snapshot UBT Log.txt timestamp before compile so we can detect a fresh log later.
+    const FString UBTLogPath = FPaths::Combine(FPaths::EngineDir(), TEXT("Programs"), TEXT("UnrealBuildTool"), TEXT("Log.txt"));
+    const FDateTime UBTLogTimestampBefore = IFileManager::Get().GetTimeStamp(*UBTLogPath);
 
-    if (CompileResult == ELiveCodingCompileResult::CompileStillActive)
+    // Capture LogLiveCoding output (compiler/linker lines) during compilation.
+    FLiveCodingOutputCollector OutputCollector;
+    GLog->AddOutputDevice(&OutputCollector);
+
+    UE_LOG(LogMCPython, Log, TEXT("LiveCoding compile started (WaitForCompletion)..."));
+    const double StartTime = FPlatformTime::Seconds();
+
+    ELiveCodingCompileResult CompileResult = ELiveCodingCompileResult::NotStarted;
+    const bool bStarted = LiveCoding->Compile(ELiveCodingCompileFlags::WaitForCompletion, &CompileResult);
+
+    GLog->RemoveOutputDevice(&OutputCollector);
+
+    const double ElapsedTime = FPlatformTime::Seconds() - StartTime;
+    const bool bSuccess = bStarted &&
+        (CompileResult == ELiveCodingCompileResult::Success ||
+         CompileResult == ELiveCodingCompileResult::NoChanges);
+
+    UE_LOG(LogMCPython, Log, TEXT("LiveCoding compile finished in %.1fs: %s"),
+        ElapsedTime, *LCCompileResultToString(CompileResult));
+
+    // Build human-readable message.
+    FString Message;
+    switch (CompileResult)
     {
-        TSharedPtr<FJsonObject> Response = MakeShareable(new FJsonObject);
-        Response->SetBoolField(TEXT("success"), false);
-        Response->SetStringField(TEXT("message"), TEXT("LiveCoding compilation is already in progress."));
-        SendJsonResponse(Response, ClientSocket);
-        return;
+    case ELiveCodingCompileResult::Success:
+        Message = FString::Printf(TEXT("Compilation succeeded in %.1f seconds."), ElapsedTime);
+        break;
+    case ELiveCodingCompileResult::NoChanges:
+        Message = FString::Printf(TEXT("Compilation finished in %.1f seconds (no changes detected)."), ElapsedTime);
+        break;
+    case ELiveCodingCompileResult::Failure:
+        Message = FString::Printf(TEXT("Compilation failed in %.1f seconds. See compile_output for details."), ElapsedTime);
+        break;
+    case ELiveCodingCompileResult::Cancelled:
+        Message = TEXT("Compilation was cancelled.");
+        break;
+    case ELiveCodingCompileResult::CompileStillActive:
+        Message = TEXT("A prior compilation is still in progress.");
+        break;
+    case ELiveCodingCompileResult::NotStarted:
+        Message = TEXT("Compilation could not be started (Live Coding monitor failed to launch).");
+        break;
+    default:
+        Message = FString::Printf(TEXT("Compilation ended with result: %s"), *LCCompileResultToString(CompileResult));
+        break;
     }
 
-    if (CompileResult == ELiveCodingCompileResult::NotStarted)
+    TSharedPtr<FJsonObject> Response = MakeShareable(new FJsonObject);
+    Response->SetBoolField(TEXT("success"), bSuccess);
+    Response->SetStringField(TEXT("compile_result"), LCCompileResultToString(CompileResult));
+    Response->SetStringField(TEXT("message"), Message);
+    Response->SetNumberField(TEXT("elapsed_seconds"), ElapsedTime);
+
+    // Attach captured LogLiveCoding output (error lines etc.) when available.
+    const FString CapturedOutput = OutputCollector.ConsumeOutput();
+    if (!CapturedOutput.IsEmpty())
     {
-        TSharedPtr<FJsonObject> Response = MakeShareable(new FJsonObject);
-        Response->SetBoolField(TEXT("success"), false);
-        Response->SetStringField(TEXT("message"), TEXT("Failed to start LiveCoding compilation. Live coding monitor could not be started."));
-        SendJsonResponse(Response, ClientSocket);
-        return;
+        Response->SetStringField(TEXT("compile_output"), CapturedOutput);
     }
 
-    // InProgress: poll until done
-    UE_LOG(LogMCPython, Log, TEXT("LiveCoding compile started. Waiting for completion..."));
-
-    double StartTime = FPlatformTime::Seconds();
-    double TimeoutSeconds = 120.0;
-
-    FTSTicker::GetCoreTicker().AddTicker(
-        FTickerDelegate::CreateLambda(
-            [this, ClientSocket, LiveCoding, StartTime, TimeoutSeconds](float DeltaTime) -> bool
+    // Supplement with MSVC diagnostics from UBT Log.txt if the file was refreshed.
+    const FDateTime UBTLogTimestampAfter = IFileManager::Get().GetTimeStamp(*UBTLogPath);
+    if (UBTLogTimestampAfter != FDateTime::MinValue() && UBTLogTimestampAfter != UBTLogTimestampBefore)
+    {
+        FString LogContent;
+        if (FFileHelper::LoadFileToString(LogContent, *UBTLogPath))
+        {
+            const FString Diagnostics = ExtractMSVCDiagnostics(LogContent);
+            if (!Diagnostics.IsEmpty())
             {
-                if (LiveCoding->IsCompiling())
-                {
-                    double ElapsedTime = FPlatformTime::Seconds() - StartTime;
-                    if (ElapsedTime > TimeoutSeconds)
-                    {
-                        TSharedPtr<FJsonObject> Response = MakeShareable(new FJsonObject);
-                        Response->SetBoolField(TEXT("success"), false);
-                        Response->SetStringField(TEXT("message"),
-                            FString::Printf(TEXT("LiveCoding compilation timed out after %.0f seconds."), TimeoutSeconds));
-                        SendJsonResponse(Response, ClientSocket);
-                        return false;
-                    }
-                    return true;
-                }
+                Response->SetStringField(TEXT("compiler_diagnostics"), Diagnostics);
+            }
+        }
+    }
 
-                double ElapsedTime = FPlatformTime::Seconds() - StartTime;
-                TSharedPtr<FJsonObject> Response = MakeShareable(new FJsonObject);
-                Response->SetBoolField(TEXT("success"), true);
-                Response->SetStringField(TEXT("message"),
-                    FString::Printf(TEXT("LiveCoding compilation finished in %.1f seconds. Check get_output_log for the result. If compilation failed, use Build.bat or msbuild-mcp-server to check detailed error messages."), ElapsedTime));
-                Response->SetNumberField(TEXT("elapsed_seconds"), ElapsedTime);
-                SendJsonResponse(Response, ClientSocket);
-                return false;
-            }),
-        0.5f
-    );
+    SendJsonResponse(Response, ClientSocket);
 }
