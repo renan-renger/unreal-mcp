@@ -129,8 +129,8 @@ def main():
     if len(sys.argv) >= 2:
         plugin_dir = Path(sys.argv[1])
     else:
-        # Auto-detect from monorepo layout: mcp-server/../Content/Python/UnrealMCPython
-        plugin_dir = Path(__file__).parent.parent / "Content" / "Python" / "UnrealMCPython"
+        # Auto-detect from monorepo layout: mcp-server/../Plugins/UnrealMCPython/Content/Python/UnrealMCPython
+        plugin_dir = Path(__file__).parent.parent / "Plugins" / "UnrealMCPython" / "Content" / "Python" / "UnrealMCPython"
 
     if not plugin_dir.is_dir():
         print(f"ERROR: Plugin directory not found: {plugin_dir}")
