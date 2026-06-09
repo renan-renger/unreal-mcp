@@ -30,6 +30,8 @@
 #include "EdGraphSchema_BehaviorTree.h"
 #include "EdGraph/EdGraph.h"
 #include "UObject/UObjectIterator.h"
+#include "Engine/SkeletalMesh.h"
+#include "Engine/SkeletalMeshSocket.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonWriter.h"
@@ -72,7 +74,9 @@ TArray<UObject*> UMCPythonHelper::GetSelectedBlueprintNodes()
         IAssetEditorInstance* AssetEditorInstance = Subsystem->FindEditorForAsset(Asset, false);
         FAssetEditorToolkit* AssetEditorToolkit = static_cast<FAssetEditorToolkit*>(AssetEditorInstance);
         if (!AssetEditorToolkit) continue;
-        TSharedPtr<SDockTab> Tab = AssetEditorToolkit->GetTabManager()->GetOwnerTab();
+        TSharedPtr<FTabManager> TabManager = AssetEditorToolkit->GetTabManager();
+        if (!TabManager.IsValid()) continue;
+        TSharedPtr<SDockTab> Tab = TabManager->GetOwnerTab();
         if (Tab.IsValid() && Tab->IsForeground())
         {
             FBlueprintEditor* BlueprintEditor = static_cast<FBlueprintEditor*>(AssetEditorToolkit);
@@ -99,7 +103,9 @@ TArray<FMCPythonBlueprintNodeInfo> UMCPythonHelper::GetSelectedBlueprintNodeInfo
         IAssetEditorInstance* AssetEditorInstance = Subsystem->FindEditorForAsset(Asset, false);
         FAssetEditorToolkit* AssetEditorToolkit = static_cast<FAssetEditorToolkit*>(AssetEditorInstance);
         if (!AssetEditorToolkit) continue;
-        TSharedPtr<SDockTab> Tab = AssetEditorToolkit->GetTabManager()->GetOwnerTab();
+        TSharedPtr<FTabManager> TabManager = AssetEditorToolkit->GetTabManager();
+        if (!TabManager.IsValid()) continue;
+        TSharedPtr<SDockTab> Tab = TabManager->GetOwnerTab();
         if (Tab.IsValid() && Tab->IsForeground())
         {
             FBlueprintEditor* BlueprintEditor = static_cast<FBlueprintEditor*>(AssetEditorToolkit);
@@ -2617,5 +2623,111 @@ FString UMCPythonHelper::SetBlueprintNodePinDefault(UBlueprint* Blueprint,
     TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
     R->SetBoolField(TEXT("success"), true);
     R->SetStringField(TEXT("message"), FString::Printf(TEXT("Set pin '%s' on '%s' to '%s'."), *PinName, *NodeName, *Value));
+    return SerializeJsonObj(R);
+}
+
+
+// ─── SkeletalMesh / Skeleton Helpers ──────────────────────────────────────────
+
+FString UMCPythonHelper::GetSkeletonBones(USkeletalMesh* Mesh)
+{
+    TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
+    if (!Mesh)
+    {
+        R->SetBoolField(TEXT("success"), false);
+        R->SetStringField(TEXT("message"), TEXT("SkeletalMesh is null."));
+        return SerializeJsonObj(R);
+    }
+
+    const FReferenceSkeleton& Ref = Mesh->GetRefSkeleton();
+    TArray<TSharedPtr<FJsonValue>> Bones;
+    for (int32 i = 0; i < Ref.GetNum(); ++i)
+    {
+        TSharedPtr<FJsonObject> B = MakeShared<FJsonObject>();
+        B->SetStringField(TEXT("name"), Ref.GetBoneName(i).ToString());
+        B->SetNumberField(TEXT("index"), i);
+        const int32 ParentIdx = Ref.GetParentIndex(i);
+        B->SetStringField(TEXT("parent"), ParentIdx >= 0 ? Ref.GetBoneName(ParentIdx).ToString() : TEXT(""));
+        Bones.Add(MakeShared<FJsonValueObject>(B));
+    }
+
+    R->SetBoolField(TEXT("success"), true);
+    R->SetNumberField(TEXT("bone_count"), Ref.GetNum());
+    R->SetArrayField(TEXT("bones"), Bones);
+    return SerializeJsonObj(R);
+}
+
+FString UMCPythonHelper::AddSkeletalMeshSocket(USkeletalMesh* Mesh, const FString& SocketName,
+    const FString& BoneName,
+    float LocationX, float LocationY, float LocationZ,
+    float RotationPitch, float RotationYaw, float RotationRoll)
+{
+    TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
+    if (!Mesh)
+    {
+        R->SetBoolField(TEXT("success"), false);
+        R->SetStringField(TEXT("message"), TEXT("SkeletalMesh is null."));
+        return SerializeJsonObj(R);
+    }
+    if (SocketName.IsEmpty() || BoneName.IsEmpty())
+    {
+        R->SetBoolField(TEXT("success"), false);
+        R->SetStringField(TEXT("message"), TEXT("SocketName and BoneName are required."));
+        return SerializeJsonObj(R);
+    }
+    if (Mesh->FindSocket(FName(*SocketName)) != nullptr)
+    {
+        R->SetBoolField(TEXT("success"), false);
+        R->SetStringField(TEXT("message"), FString::Printf(TEXT("Socket '%s' already exists."), *SocketName));
+        return SerializeJsonObj(R);
+    }
+    if (Mesh->GetRefSkeleton().FindBoneIndex(FName(*BoneName)) == INDEX_NONE)
+    {
+        R->SetBoolField(TEXT("success"), false);
+        R->SetStringField(TEXT("message"), FString::Printf(TEXT("Bone '%s' not found in skeleton."), *BoneName));
+        return SerializeJsonObj(R);
+    }
+
+    Mesh->Modify();
+    USkeletalMeshSocket* Socket = NewObject<USkeletalMeshSocket>(Mesh);
+    Socket->SocketName = FName(*SocketName);
+    Socket->BoneName = FName(*BoneName);
+    Socket->RelativeLocation = FVector(LocationX, LocationY, LocationZ);
+    Socket->RelativeRotation = FRotator(RotationPitch, RotationYaw, RotationRoll);
+    Mesh->AddSocket(Socket, false);
+    Mesh->MarkPackageDirty();
+
+    R->SetBoolField(TEXT("success"), true);
+    R->SetStringField(TEXT("socket_name"), SocketName);
+    R->SetStringField(TEXT("bone_name"), BoneName);
+    R->SetStringField(TEXT("message"), FString::Printf(TEXT("Added socket '%s' on bone '%s'."), *SocketName, *BoneName));
+    return SerializeJsonObj(R);
+}
+
+FString UMCPythonHelper::RemoveSkeletalMeshSocket(USkeletalMesh* Mesh, const FString& SocketName)
+{
+    TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
+    if (!Mesh)
+    {
+        R->SetBoolField(TEXT("success"), false);
+        R->SetStringField(TEXT("message"), TEXT("SkeletalMesh is null."));
+        return SerializeJsonObj(R);
+    }
+    USkeletalMeshSocket* Socket = Mesh->FindSocket(FName(*SocketName));
+    if (!Socket)
+    {
+        R->SetBoolField(TEXT("success"), false);
+        R->SetStringField(TEXT("message"), FString::Printf(TEXT("Socket '%s' not found."), *SocketName));
+        return SerializeJsonObj(R);
+    }
+
+    Mesh->Modify();
+    TArray<TObjectPtr<USkeletalMeshSocket>>& Sockets = Mesh->GetMeshOnlySocketList();
+    Sockets.Remove(Socket);
+    Mesh->MarkPackageDirty();
+
+    R->SetBoolField(TEXT("success"), true);
+    R->SetStringField(TEXT("removed"), SocketName);
+    R->SetStringField(TEXT("message"), FString::Printf(TEXT("Removed socket '%s'."), *SocketName));
     return SerializeJsonObj(R);
 }

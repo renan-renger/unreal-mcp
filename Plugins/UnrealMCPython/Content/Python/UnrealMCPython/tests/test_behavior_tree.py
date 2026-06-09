@@ -104,3 +104,25 @@ class TestBehaviorTreeActions(MCPTestCase):
         r = self.call("behavior_tree_actions", "ue_build_behavior_tree",
                       asset_path=self._bt_path, tree_structure=tree)
         self.assertSuccess(r)
+
+    # ── node details / selection ────────────────────────────────────────────────
+
+    def test_get_bt_node_details(self):
+        self._skip_if_no_bt()
+        # Build a tree, then read a node's details by its name from the structure.
+        self.call("behavior_tree_actions", "ue_build_behavior_tree",
+                  asset_path=self._bt_path,
+                  tree_structure={"node_class": "BTComposite_Selector", "children": []})
+        st = self.call("behavior_tree_actions", "ue_get_behavior_tree_structure",
+                       asset_path=self._bt_path)
+        self.assertSuccess(st)
+        node_name = st["tree"][0]["node_name"]
+        r = self.call("behavior_tree_actions", "ue_get_bt_node_details",
+                      asset_path=self._bt_path, node_name=node_name)
+        self.assertSuccess(r)
+
+    def test_get_selected_bt_nodes(self):
+        # No BT editor open in a headless test run → returns a structured failure.
+        # We only assert the action runs end-to-end and returns a bool success.
+        r = self.call("behavior_tree_actions", "ue_get_selected_bt_nodes")
+        self.assertIsInstance(r.get("success"), bool)

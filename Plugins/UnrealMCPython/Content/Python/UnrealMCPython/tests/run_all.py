@@ -17,14 +17,20 @@ import unittest
 _MODULES = [
     "UnrealMCPython.tests.test_util",
     "UnrealMCPython.tests.test_actor",
+    "UnrealMCPython.tests.test_animation",
     "UnrealMCPython.tests.test_asset",
     "UnrealMCPython.tests.test_level",
+    "UnrealMCPython.tests.test_level_sequence",
     "UnrealMCPython.tests.test_material",
     "UnrealMCPython.tests.test_blueprint",
     "UnrealMCPython.tests.test_behavior_tree",
+    "UnrealMCPython.tests.test_data_table",
     "UnrealMCPython.tests.test_umg",
     "UnrealMCPython.tests.test_editor",
     "UnrealMCPython.tests.test_game",
+    "UnrealMCPython.tests.test_static_mesh",
+    "UnrealMCPython.tests.test_layer",
+    "UnrealMCPython.tests.test_texture",
 ]
 
 suite = unittest.TestSuite()

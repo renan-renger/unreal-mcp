@@ -433,3 +433,85 @@ def ue_auto_layout_graph(asset_path: str = None, graph_name: str = "EventGraph",
         })
     except Exception as e:
         return json.dumps({"success": False, "message": str(e), "traceback": traceback.format_exc()})
+
+
+def ue_create_blueprint(asset_path: str = None, parent_class_path: str = "/Script/Engine.Actor") -> str:
+    """Creates a Blueprint asset with the given parent class (default Actor)."""
+    if asset_path is None:
+        return json.dumps({"success": False, "message": "Required parameter 'asset_path' is missing."})
+    try:
+        if unreal.EditorAssetLibrary.does_asset_exist(asset_path):
+            return json.dumps({"success": False, "message": f"Asset already exists: {asset_path}"})
+        parent = unreal.load_class(None, parent_class_path)
+        if not parent:
+            return json.dumps({"success": False, "message": f"Parent class not found: {parent_class_path}"})
+        asset_path = asset_path.rstrip("/")
+        idx = asset_path.rfind("/")
+        name, package = asset_path[idx + 1:], asset_path[:idx]
+        factory = unreal.BlueprintFactory()
+        factory.set_editor_property("parent_class", parent)
+        bp = unreal.AssetToolsHelpers.get_asset_tools().create_asset(name, package, unreal.Blueprint, factory)
+        if not bp:
+            return json.dumps({"success": False, "message": f"Failed to create Blueprint at {asset_path}."})
+        unreal.EditorAssetLibrary.save_loaded_asset(bp)
+        return json.dumps({"success": True, "asset_path": asset_path, "parent_class": parent_class_path})
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e), "traceback": traceback.format_exc()})
+
+
+_BP_VAR_TYPES = {"int", "byte", "bool", "real", "name", "string", "text"}
+
+
+def ue_add_variable(asset_path: str = None, variable_name: str = None, variable_type: str = "real") -> str:
+    """Adds a member variable to a Blueprint. variable_type: int, byte, bool, real (float), name, string, text."""
+    if asset_path is None or variable_name is None:
+        return json.dumps({"success": False, "message": "Required parameters: asset_path, variable_name."})
+    vt = (variable_type or "real").lower()
+    if vt == "float":
+        vt = "real"
+    if vt not in _BP_VAR_TYPES:
+        return json.dumps({"success": False, "message": f"Unsupported variable_type '{variable_type}'.",
+                           "valid_types": sorted(_BP_VAR_TYPES | {"float"})})
+    try:
+        bp = unreal.EditorAssetLibrary.load_asset(asset_path)
+        if not bp or not isinstance(bp, unreal.Blueprint):
+            return json.dumps({"success": False, "message": f"Not a Blueprint: {asset_path}"})
+        bel = unreal.BlueprintEditorLibrary
+        pin = bel.get_basic_type_by_name(unreal.Name(vt))
+        ok = bel.add_member_variable(bp, unreal.Name(variable_name), pin)
+        if not ok:
+            return json.dumps({"success": False, "message": f"add_member_variable failed for '{variable_name}'."})
+        bel.compile_blueprint(bp)
+        unreal.EditorAssetLibrary.save_loaded_asset(bp)
+        return json.dumps({"success": True, "asset_path": asset_path,
+                           "variable_name": variable_name, "variable_type": vt})
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e), "traceback": traceback.format_exc()})
+
+
+def ue_set_variable_flags(asset_path: str = None, variable_name: str = None,
+                          instance_editable: bool = None, expose_on_spawn: bool = None) -> str:
+    """Sets a Blueprint variable's 'Instance Editable' and/or 'Expose On Spawn' flags."""
+    if asset_path is None or variable_name is None:
+        return json.dumps({"success": False, "message": "Required parameters: asset_path, variable_name."})
+    if instance_editable is None and expose_on_spawn is None:
+        return json.dumps({"success": False, "message": "Provide instance_editable and/or expose_on_spawn."})
+    try:
+        bp = unreal.EditorAssetLibrary.load_asset(asset_path)
+        if not bp or not isinstance(bp, unreal.Blueprint):
+            return json.dumps({"success": False, "message": f"Not a Blueprint: {asset_path}"})
+        bel = unreal.BlueprintEditorLibrary
+        name = unreal.Name(variable_name)
+        applied = {}
+        if instance_editable is not None:
+            bel.set_blueprint_variable_instance_editable(bp, name, bool(instance_editable))
+            applied["instance_editable"] = bool(instance_editable)
+        if expose_on_spawn is not None:
+            bel.set_blueprint_variable_expose_on_spawn(bp, name, bool(expose_on_spawn))
+            applied["expose_on_spawn"] = bool(expose_on_spawn)
+        bel.compile_blueprint(bp)
+        unreal.EditorAssetLibrary.save_loaded_asset(bp)
+        return json.dumps({"success": True, "asset_path": asset_path,
+                           "variable_name": variable_name, "applied": applied})
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e), "traceback": traceback.format_exc()})

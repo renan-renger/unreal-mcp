@@ -37,3 +37,33 @@ class TestLevelActions(MCPTestCase):
     def test_set_world_settings_no_params(self):
         r = self.call("level_actions", "ue_set_world_settings")
         self.assertFalse(r.get("success"))
+
+    # ── create / load (guard paths only) ────────────────────────────────────────
+    #
+    # NOTE: create_level (new_level) and load_level switch/replace the editor's
+    # OPEN level. Exercising their happy path in the shared in-editor suite is
+    # destructive — creating a temp level, then deleting it while it is the open
+    # level, destabilized the editor and reset the TCP server during development.
+    # So we only assert the parameter-guard path here (runs the action through the
+    # full chain without mutating the editor session). The empty-param round-trip
+    # is also covered by the E2E suite.
+
+    def test_create_level_missing_path(self):
+        r = self.call("level_actions", "ue_create_level")
+        self.assertFalse(r.get("success"))
+
+    def test_load_level_missing_path(self):
+        r = self.call("level_actions", "ue_load_level")
+        self.assertFalse(r.get("success"))
+
+    # ── current level ────────────────────────────────────────────────────────────
+
+    def test_get_current_level_path(self):
+        r = self.call("level_actions", "ue_get_current_level_path")
+        self.assertSuccess(r)
+        self.assertIn("level_path", r)
+        self.assertTrue(r["level_path"])
+
+    # save_current_level / save_all_levels are not auto-tested: on an unsaved
+    # (untitled) level save_current_level can raise a modal Save-As dialog that
+    # would hang the headless suite. Verified manually instead (see KNOWN_UNTESTED).
