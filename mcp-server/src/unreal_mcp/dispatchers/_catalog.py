@@ -37,6 +37,10 @@ CATALOG = {
             'params': 'actor_label',
             'doc': 'Returns the gameplay tags (Actor.Tags) of an actor.',
         },
+        'get_actors_of_class': {
+            'params': 'class_path',
+            'doc': "Lists labels of level actors of the given class path (e.g. '/Script/Engine.PointLight').",
+        },
         'get_all_details': {
             'params': '',
             'doc': 'Lists all actors in the current level with detailed information including',
@@ -52,6 +56,10 @@ CATALOG = {
         'get_property': {
             'params': 'actor_label, property_name',
             'doc': 'Gets a property value from an actor using get_editor_property().',
+        },
+        'get_selected_actors': {
+            'params': '',
+            'doc': 'Lists the currently selected level actors (label + class).',
         },
         'invert_selection': {
             'params': '',
@@ -213,6 +221,14 @@ CATALOG = {
             'params': 'asset_path',
             'doc': 'Returns class and package info for an asset.',
         },
+        'get_dependencies': {
+            'params': 'asset_path',
+            'doc': 'Lists packages that the given asset depends on (references).',
+        },
+        'get_metadata_tag': {
+            'params': 'asset_path, tag',
+            'doc': 'Reads a metadata tag value on an asset (empty string if unset).',
+        },
         'get_static_mesh_details': {
             'params': 'asset_path',
             'doc': 'Retrieves the bounding box and dimensions of a static mesh asset.',
@@ -225,6 +241,10 @@ CATALOG = {
             'params': 'directory_path',
             'doc': 'Creates a content-browser directory.',
         },
+        'remove_metadata_tag': {
+            'params': 'asset_path, tag',
+            'doc': 'Removes a metadata tag from an asset.',
+        },
         'rename_asset': {
             'params': 'source_path, dest_path',
             'doc': 'Renames/moves an asset to a new content-browser path.',
@@ -232,6 +252,10 @@ CATALOG = {
         'save_asset': {
             'params': 'asset_path',
             'doc': 'Saves an asset to disk.',
+        },
+        'set_metadata_tag': {
+            'params': 'asset_path, tag, value',
+            'doc': 'Sets a metadata tag value on an asset.',
         },
     },
     'behavior_tree': {
@@ -424,6 +448,32 @@ CATALOG = {
             'doc': "Sets the GameMode Override on the current level's World Settings.",
         },
     },
+    'layer': {
+        'add_actor_to_layer': {
+            'params': 'actor_label, layer_name',
+            'doc': 'Adds an actor to a layer (creates the layer if needed).',
+        },
+        'create_layer': {
+            'params': 'layer_name',
+            'doc': 'Creates a new (empty) layer.',
+        },
+        'delete_layer': {
+            'params': 'layer_name',
+            'doc': 'Deletes a layer.',
+        },
+        'get_actors_in_layer': {
+            'params': 'layer_name',
+            'doc': 'Lists the labels of actors assigned to a layer.',
+        },
+        'list_layers': {
+            'params': '',
+            'doc': 'Lists all layer names in the current world.',
+        },
+        'remove_actor_from_layer': {
+            'params': 'actor_label, layer_name',
+            'doc': 'Removes an actor from a layer.',
+        },
+    },
     'level': {
         'create_level': {
             'params': 'level_path',
@@ -566,6 +616,42 @@ CATALOG = {
             'doc': 'Sets a vector parameter on a Material Instance. Expects value as [R,G,B,A]. Returns JSON string.',
         },
     },
+    'static_mesh': {
+        'add_simple_collision': {
+            'params': "asset_path, shape='BOX'",
+            'doc': 'Adds a simple collision primitive to a StaticMesh. shape: BOX, SPHERE, CAPSULE, NDOP10_X/Y/Z, NDOP18, NDOP26.',
+        },
+        'get_collision_info': {
+            'params': 'asset_path',
+            'doc': 'Returns collision complexity and simple/convex collision counts of a StaticMesh.',
+        },
+        'get_static_mesh_info': {
+            'params': 'asset_path',
+            'doc': 'Returns LOD/section/triangle/vertex/material counts and Nanite state of a StaticMesh.',
+        },
+        'list_static_mesh_materials': {
+            'params': 'asset_path',
+            'doc': 'Lists the material slots of a StaticMesh (slot index + material path).',
+        },
+        'set_static_mesh_material': {
+            'params': 'asset_path, slot_index, material_path',
+            'doc': 'Assigns a material to a StaticMesh material slot.',
+        },
+    },
+    'texture': {
+        'get_texture_info': {
+            'params': 'asset_path',
+            'doc': 'Returns size, memory, sRGB, and compression settings of a Texture2D.',
+        },
+        'set_texture_compression': {
+            'params': 'asset_path, compression',
+            'doc': "Sets the compression settings of a Texture2D (e.g. 'TC_DEFAULT', 'TC_NORMALMAP', 'TC_MASKS', 'TC_GRAYSCALE').",
+        },
+        'set_texture_srgb': {
+            'params': 'asset_path, srgb',
+            'doc': 'Sets the sRGB flag on a Texture2D.',
+        },
+    },
     'umg': {
         'add_widget': {
             'params': 'asset_path, widget_type, widget_name, parent_name',
@@ -617,6 +703,10 @@ CATALOG = {
             'params': 'code',
             'doc': 'Runs arbitrary Unreal Python code. Full API access; fastest path to prototype new actions.',
         },
+        'get_cvar': {
+            'params': 'name',
+            'doc': "Reads the current value of a console variable (CVar) as a string, e.g. 'r.ScreenPercentage'.",
+        },
         'get_output_log': {
             'params': 'line_count=50, keyword',
             'doc': 'Returns recent lines from the Unreal Engine output log file.',
@@ -628,6 +718,10 @@ CATALOG = {
         'is_in_pie': {
             'params': '',
             'doc': 'Returns whether Play-In-Editor is currently active.',
+        },
+        'list_class_properties': {
+            'params': 'class_path',
+            'doc': 'Lists the editor-settable property names of a UClass (for discovering what set_property accepts).',
         },
         'livecoding_compile': {
             'params': '',

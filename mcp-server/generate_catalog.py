@@ -34,9 +34,12 @@ DOMAINS = [
     "data_table",
     "editor",
     "game",
+    "layer",
     "level",
     "level_sequence",
     "material",
+    "static_mesh",
+    "texture",
     "umg",
     "util",
 ]
