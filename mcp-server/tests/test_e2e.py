@@ -28,7 +28,17 @@ HOST, PORT = "127.0.0.1", 12029
 # Actions excluded from the exhaustive empty-param round-trip:
 #   execute_python   — needs {code}; empty-param hits a dispatcher guard, not TCP
 #   livecoding_compile — triggers a real C++ compile (slow, side-effecting)
-_EXCLUDE = {("util", "execute_python"), ("util", "livecoding_compile")}
+#   start_pie/stop_pie — change editor PIE mode (no params to guard); would leave
+#                        the editor in PIE during the sweep
+_EXCLUDE = {
+    ("util", "execute_python"),
+    ("util", "livecoding_compile"),
+    ("util", "start_pie"),
+    ("util", "stop_pie"),
+    # save_current_level can raise a modal Save-As dialog on an untitled level.
+    ("level", "save_current_level"),
+    ("level", "save_all_levels"),
+}
 
 
 def _editor_reachable() -> bool:

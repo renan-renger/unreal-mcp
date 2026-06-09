@@ -5,17 +5,45 @@
 
 CATALOG = {
     'actor': {
+        'add_actor_tag': {
+            'params': 'actor_label, tag',
+            'doc': 'Adds a tag to an actor (Actor.Tags).',
+        },
+        'attach_actor': {
+            'params': "child_label, parent_label, socket_name=''",
+            'doc': 'Attaches one actor to another (keeps world transform). Optional socket on the parent.',
+        },
         'delete_by_label': {
             'params': 'actor_label',
             'doc': 'Deletes an actor with the specified name from the current level.',
+        },
+        'detach_actor': {
+            'params': 'actor_label',
+            'doc': 'Detaches an actor from its parent (keeps world transform).',
         },
         'duplicate_selected': {
             'params': 'offset',
             'doc': 'Duplicates all selected actors in the editor and applies a position offset to each duplicate.',
         },
+        'get_actor_bounds': {
+            'params': 'actor_label',
+            'doc': "Returns an actor's world-space bounds (origin + box extent).",
+        },
+        'get_actor_folder': {
+            'params': 'actor_label',
+            'doc': 'Returns the World Outliner folder path of an actor.',
+        },
+        'get_actor_tags': {
+            'params': 'actor_label',
+            'doc': 'Returns the gameplay tags (Actor.Tags) of an actor.',
+        },
         'get_all_details': {
             'params': '',
             'doc': 'Lists all actors in the current level with detailed information including',
+        },
+        'get_attached_actors': {
+            'params': 'actor_label',
+            'doc': 'Lists the labels of actors attached to the given actor.',
         },
         'get_in_view_frustum': {
             'params': '',
@@ -33,13 +61,25 @@ CATALOG = {
             'params': "ray_start, ray_end, trace_channel='Visibility', actors_to_ignore_labels, trace_complex=True",
             'doc': 'Performs a line trace (raycast) and returns hit information without spawning anything.',
         },
+        'list_actor_components': {
+            'params': 'actor_label',
+            'doc': 'Lists the components on an actor (name + class).',
+        },
         'list_all_with_locations': {
             'params': '',
             'doc': 'Lists all actors in the current level along with their world locations.',
         },
+        'remove_actor_tag': {
+            'params': 'actor_label, tag',
+            'doc': 'Removes a tag from an actor (Actor.Tags).',
+        },
         'select_all': {
             'params': '',
             'doc': 'Selects all actors in the current level.',
+        },
+        'set_actor_folder': {
+            'params': 'actor_label, folder_path',
+            'doc': 'Sets the World Outliner folder path of an actor.',
         },
         'set_location': {
             'params': 'actor_label, location',
@@ -145,13 +185,53 @@ CATALOG = {
         },
     },
     'asset': {
+        'asset_exists': {
+            'params': 'asset_path',
+            'doc': 'Returns whether an asset exists at the given path.',
+        },
+        'delete_asset': {
+            'params': 'asset_path',
+            'doc': 'Deletes an asset from the content browser.',
+        },
+        'delete_directory': {
+            'params': 'directory_path',
+            'doc': 'Deletes a content-browser directory and its assets.',
+        },
+        'duplicate_asset': {
+            'params': 'source_path, dest_path',
+            'doc': 'Duplicates an asset to a new content-browser path.',
+        },
         'find_by_query': {
             'params': 'name, asset_type',
             'doc': "Returns a JSON list of asset paths under '/Game' matching the given query dict.",
         },
+        'find_referencers': {
+            'params': 'asset_path',
+            'doc': 'Lists packages that reference the given asset.',
+        },
+        'get_asset_info': {
+            'params': 'asset_path',
+            'doc': 'Returns class and package info for an asset.',
+        },
         'get_static_mesh_details': {
             'params': 'asset_path',
             'doc': 'Retrieves the bounding box and dimensions of a static mesh asset.',
+        },
+        'list_assets': {
+            'params': 'directory_path, recursive=True',
+            'doc': 'Lists asset paths under a content directory.',
+        },
+        'make_directory': {
+            'params': 'directory_path',
+            'doc': 'Creates a content-browser directory.',
+        },
+        'rename_asset': {
+            'params': 'source_path, dest_path',
+            'doc': 'Renames/moves an asset to a new content-browser path.',
+        },
+        'save_asset': {
+            'params': 'asset_path',
+            'doc': 'Saves an asset to disk.',
         },
     },
     'behavior_tree': {
@@ -270,6 +350,40 @@ CATALOG = {
             'doc': "Sets a property on a component template in a Blueprint's SCS.",
         },
     },
+    'data_table': {
+        'create_data_table': {
+            'params': 'asset_path, row_struct_path',
+            'doc': "Creates a DataTable asset with the given row struct (e.g. '/Script/MyModule.MyRow' or a UserDefinedStruct path).",
+        },
+        'does_row_exist': {
+            'params': 'asset_path, row_name',
+            'doc': 'Returns whether a row exists in a DataTable.',
+        },
+        'export_to_csv': {
+            'params': 'asset_path',
+            'doc': 'Returns all rows of a DataTable as a CSV string.',
+        },
+        'get_column_names': {
+            'params': 'asset_path',
+            'doc': "Lists the column (property) names of a DataTable's row struct.",
+        },
+        'get_row_names': {
+            'params': 'asset_path',
+            'doc': 'Lists the row names of a DataTable.',
+        },
+        'get_rows_as_json': {
+            'params': 'asset_path',
+            'doc': "Returns all rows of a DataTable as a JSON string (under the 'rows' field).",
+        },
+        'remove_row': {
+            'params': 'asset_path, row_name',
+            'doc': 'Removes a row from a DataTable by name.',
+        },
+        'set_rows_from_json': {
+            'params': 'asset_path, json_string',
+            'doc': "Replaces a DataTable's rows from a JSON string (array of row objects with a 'Name' key).",
+        },
+    },
     'editor': {
         'get_selected_assets': {
             'params': '',
@@ -315,6 +429,10 @@ CATALOG = {
             'params': 'level_path',
             'doc': 'Creates a new empty level and saves it at the given content-browser path.',
         },
+        'get_current_level_path': {
+            'params': '',
+            'doc': 'Returns the path of the currently open editor world/level.',
+        },
         'list_level_actors': {
             'params': 'class_filter',
             'doc': 'Lists all actors in the current level.',
@@ -322,6 +440,14 @@ CATALOG = {
         'load_level': {
             'params': 'level_path',
             'doc': 'Opens (loads) an existing level in the editor.',
+        },
+        'save_all_levels': {
+            'params': '',
+            'doc': 'Saves all dirty levels.',
+        },
+        'save_current_level': {
+            'params': '',
+            'doc': 'Saves the currently open level. Returns success=False for an unsaved/untitled level.',
         },
         'set_world_settings': {
             'params': 'gravity, time_dilation',
@@ -483,6 +609,10 @@ CATALOG = {
         },
     },
     'util': {
+        'execute_console_command': {
+            'params': 'command',
+            'doc': "Executes an editor console command (e.g. 'stat fps', 'r.ScreenPercentage 50').",
+        },
         'execute_python': {
             'params': 'code',
             'doc': 'Runs arbitrary Unreal Python code. Full API access; fastest path to prototype new actions.',
@@ -491,6 +621,14 @@ CATALOG = {
             'params': 'line_count=50, keyword',
             'doc': 'Returns recent lines from the Unreal Engine output log file.',
         },
+        'get_viewport_camera': {
+            'params': '',
+            'doc': 'Returns the level viewport camera location and rotation.',
+        },
+        'is_in_pie': {
+            'params': '',
+            'doc': 'Returns whether Play-In-Editor is currently active.',
+        },
         'livecoding_compile': {
             'params': '',
             'doc': 'Triggers C++ Live Coding and waits for the compile result.',
@@ -498,6 +636,22 @@ CATALOG = {
         'print_message': {
             'params': 'message',
             'doc': 'Logs a message to the Unreal log and returns a JSON success response.',
+        },
+        'save_all_dirty': {
+            'params': '',
+            'doc': 'Saves all dirty packages (modified maps and content).',
+        },
+        'set_viewport_camera': {
+            'params': 'location, rotation',
+            'doc': 'Sets the level viewport camera. location=[x,y,z], rotation=[pitch,yaw,roll].',
+        },
+        'start_pie': {
+            'params': '',
+            'doc': 'Starts Play-In-Editor (asynchronous; begins on the next frame).',
+        },
+        'stop_pie': {
+            'params': '',
+            'doc': 'Stops Play-In-Editor.',
         },
     },
 }
