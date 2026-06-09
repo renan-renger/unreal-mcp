@@ -1,0 +1,94 @@
+# Copyright (c) 2025 GenOrca. All Rights Reserved.
+
+"""
+Action coverage enforcement (offline, no Unreal needed).
+
+Every catalog action must be exercised by an in-editor unittest
+(Plugins/.../tests/test_<domain>.py references "ue_<action>"), OR be listed
+in KNOWN_UNTESTED below as acknowledged technical debt.
+
+Why: the dispatcher auto-exposes any ue_* function. Without this gate, a new
+action could ship with zero behavior test and all other gates stay green.
+This makes "add an action without a test" a conscious, reviewable choice
+(you must edit KNOWN_UNTESTED) rather than a silent gap.
+
+KNOWN_UNTESTED is debt to shrink, not to grow. The stale-entry check fails if
+an allowlisted action becomes tested or disappears, so the list self-cleans.
+"""
+
+import re
+from pathlib import Path
+
+import pytest
+
+from unreal_mcp.dispatchers._catalog import CATALOG
+
+PLUGIN_TESTS = (
+    Path(__file__).resolve().parents[2]
+    / "Plugins" / "UnrealMCPython" / "Content" / "Python" / "UnrealMCPython" / "tests"
+)
+
+# Actions not routed as ue_<action> over TCP — covered by mcp-server pytest instead.
+SPECIAL = {"util": {"execute_python", "livecoding_compile"}}
+
+# ── Technical debt: actions with no in-editor behavior test yet. SHRINK over time. ──
+# Adding a new action? Write a test in test_<domain>.py instead of adding it here.
+KNOWN_UNTESTED = {
+    "actor": {"duplicate_selected", "spawn_from_object", "spawn_on_surface_raycast"},
+    "behavior_tree": {"get_bt_node_details", "get_selected_bt_nodes"},
+    "blueprint": {
+        "build_blueprint_graph", "connect_blueprint_pins", "get_selected_bp_node_infos",
+        "get_selected_bp_nodes", "remove_blueprint_node", "set_blueprint_node_position",
+        "set_component_property",
+    },
+    "editor": {"replace_mesh_on_selected", "replace_mtl_on_selected", "replace_selected_with_bp"},
+    "level": {"create_level", "load_level"},
+    "material": {
+        "connect_expressions", "get_mi_static_switch", "get_mi_texture_param",
+        "set_mi_static_switch", "set_mi_texture_param",
+    },
+    "umg": {"get_widget_property", "set_text_style", "set_widget_property"},
+}
+
+
+def _referenced(domain: str) -> set[str]:
+    tf = PLUGIN_TESTS / f"test_{domain}.py"
+    if not tf.exists():
+        return set()
+    return set(re.findall(r"ue_(\w+)", tf.read_text(encoding="utf-8")))
+
+
+def _allowed(domain: str) -> set[str]:
+    return SPECIAL.get(domain, set()) | KNOWN_UNTESTED.get(domain, set())
+
+
+@pytest.mark.parametrize("domain", sorted(CATALOG))
+def test_every_action_is_tested_or_allowlisted(domain):
+    referenced = _referenced(domain)
+    untested = [
+        a for a in CATALOG[domain]
+        if a not in referenced and a not in _allowed(domain)
+    ]
+    assert not untested, (
+        f"{domain}: these actions have no in-editor test and are not allowlisted: "
+        f"{untested}. Add a test in test_{domain}.py, or (consciously) add them to "
+        f"KNOWN_UNTESTED in test_coverage.py."
+    )
+
+
+def test_no_stale_allowlist_entries():
+    """KNOWN_UNTESTED must not contain actions that are now tested or no longer exist."""
+    stale = []
+    for domain, actions in KNOWN_UNTESTED.items():
+        referenced = _referenced(domain)
+        for a in actions:
+            if a not in CATALOG.get(domain, {}):
+                stale.append(f"{domain}.{a} (not in catalog)")
+            elif a in referenced:
+                stale.append(f"{domain}.{a} (now tested — remove from allowlist)")
+    assert not stale, f"Stale KNOWN_UNTESTED entries: {stale}"
+
+
+def test_plugin_tests_dir_exists():
+    """Guard: if the layout moves, fail loudly instead of silently passing coverage."""
+    assert PLUGIN_TESTS.is_dir(), f"Plugin tests dir not found: {PLUGIN_TESTS}"

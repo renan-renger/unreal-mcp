@@ -69,17 +69,24 @@ def test_standard_routing_module_fn_params(recorder):
     ]
 
 
-def test_every_domain_first_action_routes(recorder):
-    """Smoke: one real action per standard domain routes to the right module/fn."""
+def _standard_action_pairs():
+    """Every (domain, action) routed via the standard path (excludes util specials)."""
+    pairs = []
     for domain in CATALOG:
         if domain == "util":
-            continue  # special-cased below
-        action = next(a for a in CATALOG[domain] if a != "list_actions")
-        recorder.clear()
-        run(disp._dispatch(domain, action, {}))
-        module, fn, _ = recorder[0]
-        assert module == f"UnrealMCPython.{domain}_actions"
-        assert fn == f"ue_{action}"
+            continue  # special-cased separately
+        for action in CATALOG[domain]:
+            pairs.append((domain, action))
+    return pairs
+
+
+@pytest.mark.parametrize("domain,action", _standard_action_pairs())
+def test_every_catalog_action_routes(domain, action, recorder):
+    """Full coverage: each catalog action routes to its module + ue_<action>."""
+    run(disp._dispatch(domain, action, {}))
+    module, fn, _ = recorder[0]
+    assert module == f"UnrealMCPython.{domain}_actions"
+    assert fn == f"ue_{action}"
 
 
 def test_params_passed_through_untouched(recorder):
