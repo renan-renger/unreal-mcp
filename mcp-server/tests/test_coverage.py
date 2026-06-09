@@ -33,21 +33,8 @@ SPECIAL = {"util": {"execute_python", "livecoding_compile"}}
 
 # ── Technical debt: actions with no in-editor behavior test yet. SHRINK over time. ──
 # Adding a new action? Write a test in test_<domain>.py instead of adding it here.
-KNOWN_UNTESTED = {
-    "behavior_tree": {"get_bt_node_details", "get_selected_bt_nodes"},
-    "blueprint": {
-        "build_blueprint_graph", "connect_blueprint_pins", "get_selected_bp_node_infos",
-        "get_selected_bp_nodes", "remove_blueprint_node", "set_blueprint_node_position",
-        "set_component_property",
-    },
-    "editor": {"replace_mesh_on_selected", "replace_mtl_on_selected", "replace_selected_with_bp"},
-    "level": {"create_level", "load_level"},
-    "material": {
-        "connect_expressions", "get_mi_static_switch", "get_mi_texture_param",
-        "set_mi_static_switch", "set_mi_texture_param",
-    },
-    "umg": {"get_widget_property", "set_text_style", "set_widget_property"},
-}
+# Currently empty: every catalog action has an in-editor behavior test.
+KNOWN_UNTESTED: dict[str, set[str]] = {}
 
 
 def _referenced(domain: str) -> set[str]:

@@ -32,15 +32,27 @@ class TestMaterialActions(MCPTestCase):
         if vec:
             vec.set_editor_property('parameter_name', unreal.Name('TestVector'))
 
+        sw = unreal.MaterialEditingLibrary.create_material_expression(
+            mat, unreal.MaterialExpressionStaticBoolParameter, 0, 300)
+        if sw:
+            sw.set_editor_property('parameter_name', unreal.Name('TestSwitch'))
+
+        tex = unreal.MaterialEditingLibrary.create_material_expression(
+            mat, unreal.MaterialExpressionTextureSampleParameter2D, 0, 450)
+        if tex:
+            tex.set_editor_property('parameter_name', unreal.Name('TestTexture'))
+
         unreal.MaterialEditingLibrary.recompile_material(mat)
         unreal.EditorAssetLibrary.save_loaded_asset(mat)
 
         try:
-            mi_factory = unreal.MaterialInstanceConstantFactoryNew()
-            mi_factory.set_editor_property('initial_parent', mat)
             mi = tools.create_asset(_MI_NAME, TEST_ROOT,
-                                    unreal.MaterialInstanceConstant, mi_factory)
+                                    unreal.MaterialInstanceConstant,
+                                    unreal.MaterialInstanceConstantFactoryNew())
             if mi:
+                # The factory has no 'initial_parent' in this engine version;
+                # set the parent on the instance directly, then refresh it.
+                mi.set_editor_property('parent', mat)
                 self._mi_path = _MI_PATH
                 unreal.MaterialEditingLibrary.update_material_instance(mi)
                 unreal.EditorAssetLibrary.save_loaded_asset(mi)
@@ -107,3 +119,49 @@ class TestMaterialActions(MCPTestCase):
                       instance_path=self._mi_path, parameter_name="TestVector")
         self.assertSuccess(r)
         self.assertEqual(len(r["value"]), 4)
+
+    # ── MI static switch ────────────────────────────────────────────────────────
+
+    def test_set_get_mi_static_switch(self):
+        if not self._mi_path:
+            self.skipTest("MaterialInstance not created in setUp")
+        r = self.call("material_actions", "ue_set_mi_static_switch",
+                      instance_path=self._mi_path,
+                      parameter_name="TestSwitch", value=True)
+        self.assertSuccess(r)
+        r = self.call("material_actions", "ue_get_mi_static_switch",
+                      instance_path=self._mi_path, parameter_name="TestSwitch")
+        self.assertSuccess(r)
+        self.assertEqual(r["value"], True)
+
+    # ── MI texture ──────────────────────────────────────────────────────────────
+
+    def test_set_get_mi_texture_param(self):
+        if not self._mi_path:
+            self.skipTest("MaterialInstance not created in setUp")
+        r = self.call("material_actions", "ue_set_mi_texture_param",
+                      instance_path=self._mi_path, parameter_name="TestTexture",
+                      texture_path="/Engine/EngineResources/DefaultTexture")
+        self.assertSuccess(r)
+        r = self.call("material_actions", "ue_get_mi_texture_param",
+                      instance_path=self._mi_path, parameter_name="TestTexture")
+        self.assertSuccess(r)
+
+    # ── connect expressions ─────────────────────────────────────────────────────
+
+    def test_connect_expressions(self):
+        if not self._mat_path:
+            self.skipTest("Material not created in setUp")
+        a = self.call("material_actions", "ue_create_expression",
+                      material_path=self._mat_path,
+                      expression_class_name="Constant", node_pos_x=-600, node_pos_y=0)
+        self.assertSuccess(a)
+        b = self.call("material_actions", "ue_create_expression",
+                      material_path=self._mat_path,
+                      expression_class_name="Multiply", node_pos_x=-300, node_pos_y=0)
+        self.assertSuccess(b)
+        r = self.call("material_actions", "ue_connect_expressions",
+                      material_path=self._mat_path,
+                      from_expression_identifier=a["expression_name"], from_output_name="",
+                      to_expression_identifier=b["expression_name"], to_input_name="A")
+        self.assertSuccess(r)

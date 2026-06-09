@@ -104,6 +104,39 @@ class TestUMGActions(MCPTestCase):
                       size_x=800.0, size_y=600.0)
         self.assertSuccess(r)
 
+    def test_set_get_widget_property(self):
+        self._skip_if_no_wbp()
+        self.call("umg_actions", "ue_add_widget",
+                  asset_path=self._wbp_path,
+                  widget_type="CanvasPanel", widget_name="RootCanvas")
+        self.call("umg_actions", "ue_add_widget",
+                  asset_path=self._wbp_path,
+                  widget_type="TextBlock", widget_name="PropText",
+                  parent_name="RootCanvas")
+        r = self.call("umg_actions", "ue_set_widget_property",
+                      asset_path=self._wbp_path, widget_name="PropText",
+                      property_name="ToolTipText", value="hello tip")
+        self.assertSuccess(r)
+        r = self.call("umg_actions", "ue_get_widget_property",
+                      asset_path=self._wbp_path, widget_name="PropText",
+                      property_name="ToolTipText")
+        self.assertSuccess(r)
+        self.assertIn("value", r)
+
+    def test_set_text_style(self):
+        self._skip_if_no_wbp()
+        self.call("umg_actions", "ue_add_widget",
+                  asset_path=self._wbp_path,
+                  widget_type="CanvasPanel", widget_name="RootCanvas")
+        self.call("umg_actions", "ue_add_widget",
+                  asset_path=self._wbp_path,
+                  widget_type="TextBlock", widget_name="StyledText",
+                  parent_name="RootCanvas")
+        r = self.call("umg_actions", "ue_set_text_style",
+                      asset_path=self._wbp_path, widget_name="StyledText",
+                      font_size=30, color_r=1.0, color_g=0.0, color_b=0.0, color_a=1.0)
+        self.assertSuccess(r)
+
     # ── compile ───────────────────────────────────────────────────────────────
 
     def test_compile_widget_blueprint(self):
