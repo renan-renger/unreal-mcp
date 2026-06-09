@@ -21,8 +21,14 @@ import socket
 import pytest
 
 import unreal_mcp.dispatcher as disp
+from unreal_mcp.dispatchers._catalog import CATALOG
 
 HOST, PORT = "127.0.0.1", 12029
+
+# Actions excluded from the exhaustive empty-param round-trip:
+#   execute_python   — needs {code}; empty-param hits a dispatcher guard, not TCP
+#   livecoding_compile — triggers a real C++ compile (slow, side-effecting)
+_EXCLUDE = {("util", "execute_python"), ("util", "livecoding_compile")}
 
 
 def _editor_reachable() -> bool:
@@ -76,3 +82,44 @@ def test_list_actions_offline_path_still_works():
     r = run(disp._dispatch("material", "list_actions", {}))
     assert r["success"] is True
     assert r["domain"] == "material"
+
+
+def test_execute_python_round_trip():
+    """execute_python runs real Unreal Python through the chain."""
+    r = run(disp.util.fn(action="execute_python",
+                         params={"code": "print('e2e_marker_42')"}))
+    # send_python_exec returns the raw wrapper; the printed marker is in 'result'.
+    blob = r.get("result", "") + r.get("message", "")
+    assert "e2e_marker_42" in blob, f"execute_python did not echo marker: {r}"
+
+
+# ── exhaustive: every catalog action survives the full chain ───────────────────
+
+def _all_action_pairs():
+    pairs = []
+    for domain, actions in CATALOG.items():
+        for action in actions:
+            if (domain, action) in _EXCLUDE:
+                continue
+            pairs.append((domain, action))
+    return pairs
+
+
+@pytest.mark.parametrize("domain,action", _all_action_pairs())
+def test_every_action_round_trips(domain, action):
+    """
+    Drive every action through the real chain with empty params and assert we get
+    back an unwrapped dict containing 'success'. This proves routing + TCP +
+    C++ dispatch + result unwrapping work for the action — independent of whether
+    the action *succeeds* with no args (validation failures still return a dict).
+
+    Empty params are safe: execute_action wraps any exception (incl. missing-arg
+    TypeError) as {"success": false, ...}, and ue_* functions validate required
+    params before doing work.
+    """
+    if domain == "util":
+        r = run(disp.util.fn(action=action, params={}))
+    else:
+        r = run(disp._dispatch(domain, action, {}))
+    assert isinstance(r, dict), f"{domain}.{action} returned non-dict: {r!r}"
+    assert "success" in r, f"chain/unwrap failed for {domain}.{action}: {r!r}"
