@@ -30,6 +30,31 @@ async def send_unreal_action(action_module: str, params: dict) -> dict:
     except Exception as e:
         return {"success": False, "message": f"An unexpected error occurred: {str(e)}"}
 
+def _unwrap_result(response: dict) -> dict:
+    """
+    The TCP server's python_call path double-wraps the action's JSON return.
+    The C++ server runs `print(execute_action(...))` and captures stdout into a
+    string "result" field, so the wire shape is:
+
+        {"success": <python-exec ok>, "message": ..., "result": "<action json string>"}
+
+    The OUTER "success" is whether Python *ran*, NOT whether the action
+    succeeded. The real action dict (with its own "success", "actor_label", ...)
+    is the JSON string in "result". Unwrap it so callers get the action dict.
+    """
+    if not isinstance(response, dict):
+        return response
+    inner = response.get("result")
+    if isinstance(inner, str):
+        try:
+            parsed = json.loads(inner)
+        except (ValueError, TypeError):
+            return response
+        if isinstance(parsed, (dict, list)):
+            return parsed
+    return response
+
+
 # Core send_to_unreal function
 async def send_to_unreal(action_module: str, action_name: str, params: dict) -> dict:
     """
@@ -75,14 +100,18 @@ async def send_to_unreal(action_module: str, action_name: str, params: dict) -> 
 
             response_str = response_buffer.decode('utf-8')
             response_json = json.loads(response_str)
-            
-            # Standardize error propagation from Unreal
+
+            # Outer "success" is python-exec success. False = Python failed to run
+            # (bad module/function, syntax error) → propagate as an error.
             if isinstance(response_json, dict) and response_json.get("success") is False:
                 raise UnrealExecutionError(
                     response_json.get("message", "Unknown error from Unreal action."),
                     details=response_json.get("details")
                 )
-            return response_json
+
+            # Python ran; unwrap the action's real result out of the "result" string.
+            # The action's own success/failure is preserved in the unwrapped dict.
+            return _unwrap_result(response_json)
 
     except socket.timeout:
         raise UnrealExecutionError(f"Socket timeout ({HOST}:{PORT}): No response from Unreal.", details={"host": HOST, "port": PORT})
