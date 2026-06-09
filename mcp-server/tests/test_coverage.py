@@ -34,7 +34,6 @@ SPECIAL = {"util": {"execute_python", "livecoding_compile"}}
 # ── Technical debt: actions with no in-editor behavior test yet. SHRINK over time. ──
 # Adding a new action? Write a test in test_<domain>.py instead of adding it here.
 KNOWN_UNTESTED = {
-    "actor": {"duplicate_selected", "spawn_from_object", "spawn_on_surface_raycast"},
     "behavior_tree": {"get_bt_node_details", "get_selected_bt_nodes"},
     "blueprint": {
         "build_blueprint_graph", "connect_blueprint_pins", "get_selected_bp_node_infos",
