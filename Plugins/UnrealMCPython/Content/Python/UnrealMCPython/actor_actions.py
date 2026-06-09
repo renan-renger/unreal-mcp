@@ -933,3 +933,133 @@ def ue_get_selected_actors() -> str:
                            "actors": [{"label": a.get_actor_label(), "class": a.get_class().get_name()} for a in sel]})
     except Exception as e:
         return json.dumps({"success": False, "message": str(e), "traceback": traceback.format_exc()})
+
+
+def ue_rename_actor(actor_label: str = None, new_label: str = None) -> str:
+    """Renames an actor (changes its World Outliner label)."""
+    if actor_label is None or new_label is None:
+        return json.dumps({"success": False, "message": "Required parameters: actor_label, new_label."})
+    try:
+        actor = _get_actor_by_label(actor_label)
+        if not actor:
+            return json.dumps({"success": False, "message": f"Actor not found: {actor_label}"})
+        actor.set_actor_label(new_label)
+        return json.dumps({"success": True, "old_label": actor_label, "new_label": actor.get_actor_label()})
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e), "traceback": traceback.format_exc()})
+
+
+def ue_set_actor_hidden(actor_label: str = None, hidden: bool = None) -> str:
+    """Shows/hides an actor in the editor viewport (temporary editor visibility)."""
+    if actor_label is None or hidden is None:
+        return json.dumps({"success": False, "message": "Required parameters: actor_label, hidden."})
+    try:
+        actor = _get_actor_by_label(actor_label)
+        if not actor:
+            return json.dumps({"success": False, "message": f"Actor not found: {actor_label}"})
+        actor.set_is_temporarily_hidden_in_editor(bool(hidden))
+        return json.dumps({"success": True, "actor_label": actor_label, "hidden": bool(hidden)})
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e), "traceback": traceback.format_exc()})
+
+
+def ue_select_actors(actor_labels: list = None) -> str:
+    """Selects the given actors by label in the editor (replaces current selection)."""
+    if actor_labels is None:
+        return json.dumps({"success": False, "message": "Required parameter 'actor_labels' is missing."})
+    try:
+        sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+        found, missing = [], []
+        for label in actor_labels:
+            a = _get_actor_by_label(label)
+            (found.append(a) if a else missing.append(label))
+        sub.set_selected_level_actors(found)
+        return json.dumps({"success": True, "selected": [a.get_actor_label() for a in found], "missing": missing})
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e), "traceback": traceback.format_exc()})
+
+
+def ue_get_transform(actor_label: str = None) -> str:
+    """Returns an actor's world location, rotation, and scale."""
+    if actor_label is None:
+        return json.dumps({"success": False, "message": "Required parameter 'actor_label' is missing."})
+    try:
+        actor = _get_actor_by_label(actor_label)
+        if not actor:
+            return json.dumps({"success": False, "message": f"Actor not found: {actor_label}"})
+        loc = actor.get_actor_location()
+        rot = actor.get_actor_rotation()
+        scale = actor.get_actor_scale3d()
+        return json.dumps({
+            "success": True, "actor_label": actor_label,
+            "location": [round(loc.x, 3), round(loc.y, 3), round(loc.z, 3)],
+            "rotation": [round(rot.pitch, 3), round(rot.yaw, 3), round(rot.roll, 3)],
+            "scale": [round(scale.x, 3), round(scale.y, 3), round(scale.z, 3)],
+        })
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e), "traceback": traceback.format_exc()})
+
+
+def _find_component_on_actor(actor, component_name):
+    for c in actor.get_components_by_class(unreal.ActorComponent):
+        if c.get_name() == component_name:
+            return c
+    return None
+
+
+def ue_get_component_property(actor_label: str = None, component_name: str = None, property_name: str = None) -> str:
+    """Reads a property on a named component of a live level actor."""
+    if actor_label is None or component_name is None or property_name is None:
+        return json.dumps({"success": False, "message": "Required parameters: actor_label, component_name, property_name."})
+    try:
+        actor = _get_actor_by_label(actor_label)
+        if not actor:
+            return json.dumps({"success": False, "message": f"Actor not found: {actor_label}"})
+        comp = _find_component_on_actor(actor, component_name)
+        if not comp:
+            return json.dumps({"success": False, "message": f"Component '{component_name}' not found on '{actor_label}'."})
+        value = _serialize_ue_value(comp.get_editor_property(property_name))
+        return json.dumps({"success": True, "actor_label": actor_label, "component": component_name,
+                           "property": property_name, "value": value})
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e), "traceback": traceback.format_exc()})
+
+
+def ue_set_component_property(actor_label: str = None, component_name: str = None,
+                             property_name: str = None, value=None) -> str:
+    """Sets a property on a named component of a live level actor (e.g. PointLightComponent 'intensity')."""
+    if actor_label is None or component_name is None or property_name is None:
+        return json.dumps({"success": False, "message": "Required parameters: actor_label, component_name, property_name."})
+    try:
+        actor = _get_actor_by_label(actor_label)
+        if not actor:
+            return json.dumps({"success": False, "message": f"Actor not found: {actor_label}"})
+        comp = _find_component_on_actor(actor, component_name)
+        if not comp:
+            return json.dumps({"success": False, "message": f"Component '{component_name}' not found on '{actor_label}'."})
+        current = comp.get_editor_property(property_name)
+        comp.set_editor_property(property_name, _convert_value_for_property(current, value))
+        return json.dumps({"success": True, "actor_label": actor_label, "component": component_name,
+                           "property": property_name, "value": _serialize_ue_value(comp.get_editor_property(property_name))})
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e), "traceback": traceback.format_exc()})
+
+
+def ue_duplicate_actor(actor_label: str = None, offset: list = None) -> str:
+    """Duplicates a specific actor (by label) with an optional [x,y,z] offset."""
+    if actor_label is None:
+        return json.dumps({"success": False, "message": "Required parameter 'actor_label' is missing."})
+    try:
+        actor = _get_actor_by_label(actor_label)
+        if not actor:
+            return json.dumps({"success": False, "message": f"Actor not found: {actor_label}"})
+        off = offset or [0.0, 0.0, 0.0]
+        if len(off) != 3:
+            return json.dumps({"success": False, "message": "offset must be a list of 3 floats."})
+        sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+        dup = sub.duplicate_actor(actor, offset=unreal.Vector(float(off[0]), float(off[1]), float(off[2])))
+        if not dup:
+            return json.dumps({"success": False, "message": "Duplication failed."})
+        return json.dumps({"success": True, "source": actor_label, "duplicated": dup.get_actor_label()})
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e), "traceback": traceback.format_exc()})

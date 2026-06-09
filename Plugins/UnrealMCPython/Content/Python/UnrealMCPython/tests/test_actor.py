@@ -268,3 +268,72 @@ class TestActorActions(MCPTestCase):
         r = self.call("actor_actions", "ue_get_selected_actors")
         self.assertSuccess(r)
         self.assertIsInstance(r["actors"], list)
+
+    def test_rename_actor(self):
+        self.assertIsNotNone(self._actor_label, "no setUp actor")
+        new = self._actor_label + "_Renamed"
+        r = self.call("actor_actions", "ue_rename_actor",
+                      actor_label=self._actor_label, new_label=new)
+        self.assertSuccess(r)
+        self.assertEqual(r["new_label"], new)
+        self._actor_label = new  # so tearDown deletes the right one
+
+    def test_set_actor_hidden(self):
+        self.assertIsNotNone(self._actor_label, "no setUp actor")
+        r = self.call("actor_actions", "ue_set_actor_hidden",
+                      actor_label=self._actor_label, hidden=True)
+        self.assertSuccess(r)
+        self.call("actor_actions", "ue_set_actor_hidden",
+                  actor_label=self._actor_label, hidden=False)
+
+    def test_select_actors(self):
+        self.assertIsNotNone(self._actor_label, "no setUp actor")
+        r = self.call("actor_actions", "ue_select_actors", actor_labels=[self._actor_label])
+        self.assertSuccess(r)
+        self.assertIn(self._actor_label, r["selected"])
+
+    def test_select_actors_missing(self):
+        r = self.call("actor_actions", "ue_select_actors", actor_labels=["NoSuchActor_XYZ"])
+        self.assertSuccess(r)
+        self.assertIn("NoSuchActor_XYZ", r["missing"])
+
+    def test_get_transform(self):
+        self.assertIsNotNone(self._actor_label, "no setUp actor")
+        r = self.call("actor_actions", "ue_get_transform", actor_label=self._actor_label)
+        self.assertSuccess(r)
+        self.assertEqual(len(r["location"]), 3)
+        self.assertEqual(len(r["rotation"]), 3)
+        self.assertEqual(len(r["scale"]), 3)
+
+    def test_get_set_component_property(self):
+        self.assertIsNotNone(self._actor_label, "no setUp actor")
+        comps = self.call("actor_actions", "ue_list_actor_components",
+                          actor_label=self._actor_label)["components"]
+        light = next((c["name"] for c in comps if "Light" in c["class"]), comps[0]["name"])
+        r = self.call("actor_actions", "ue_set_component_property",
+                      actor_label=self._actor_label, component_name=light,
+                      property_name="intensity", value=12345.0)
+        self.assertSuccess(r)
+        r = self.call("actor_actions", "ue_get_component_property",
+                      actor_label=self._actor_label, component_name=light,
+                      property_name="intensity")
+        self.assertSuccess(r)
+        self.assertAlmostEqual(r["value"], 12345.0, places=1)
+
+    def test_get_component_property_unknown(self):
+        self.assertIsNotNone(self._actor_label, "no setUp actor")
+        r = self.call("actor_actions", "ue_get_component_property",
+                      actor_label=self._actor_label, component_name="NoSuchComp",
+                      property_name="intensity")
+        self.assertFalse(r.get("success"))
+
+    def test_duplicate_actor(self):
+        self.assertIsNotNone(self._actor_label, "no setUp actor")
+        r = self.call("actor_actions", "ue_duplicate_actor",
+                      actor_label=self._actor_label, offset=[150, 0, 0])
+        self.assertSuccess(r)
+        self.delete_actor_by_label(r["duplicated"])
+
+    def test_duplicate_actor_unknown(self):
+        r = self.call("actor_actions", "ue_duplicate_actor", actor_label="NoSuchActor_XYZ")
+        self.assertFalse(r.get("success"))

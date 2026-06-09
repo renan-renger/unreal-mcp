@@ -21,6 +21,10 @@ CATALOG = {
             'params': 'actor_label',
             'doc': 'Detaches an actor from its parent (keeps world transform).',
         },
+        'duplicate_actor': {
+            'params': 'actor_label, offset',
+            'doc': 'Duplicates a specific actor (by label) with an optional [x,y,z] offset.',
+        },
         'duplicate_selected': {
             'params': 'offset',
             'doc': 'Duplicates all selected actors in the editor and applies a position offset to each duplicate.',
@@ -49,6 +53,10 @@ CATALOG = {
             'params': 'actor_label',
             'doc': 'Lists the labels of actors attached to the given actor.',
         },
+        'get_component_property': {
+            'params': 'actor_label, component_name, property_name',
+            'doc': 'Reads a property on a named component of a live level actor.',
+        },
         'get_in_view_frustum': {
             'params': '',
             'doc': "Retrieves a list of actors that are potentially visible within the active editor viewport's frustum.",
@@ -60,6 +68,10 @@ CATALOG = {
         'get_selected_actors': {
             'params': '',
             'doc': 'Lists the currently selected level actors (label + class).',
+        },
+        'get_transform': {
+            'params': 'actor_label',
+            'doc': "Returns an actor's world location, rotation, and scale.",
         },
         'invert_selection': {
             'params': '',
@@ -81,6 +93,14 @@ CATALOG = {
             'params': 'actor_label, tag',
             'doc': 'Removes a tag from an actor (Actor.Tags).',
         },
+        'rename_actor': {
+            'params': 'actor_label, new_label',
+            'doc': 'Renames an actor (changes its World Outliner label).',
+        },
+        'select_actors': {
+            'params': 'actor_labels',
+            'doc': 'Selects the given actors by label in the editor (replaces current selection).',
+        },
         'select_all': {
             'params': '',
             'doc': 'Selects all actors in the current level.',
@@ -88,6 +108,14 @@ CATALOG = {
         'set_actor_folder': {
             'params': 'actor_label, folder_path',
             'doc': 'Sets the World Outliner folder path of an actor.',
+        },
+        'set_actor_hidden': {
+            'params': 'actor_label, hidden',
+            'doc': 'Shows/hides an actor in the editor viewport (temporary editor visibility).',
+        },
+        'set_component_property': {
+            'params': 'actor_label, component_name, property_name, value',
+            'doc': "Sets a property on a named component of a live level actor (e.g. PointLightComponent 'intensity').",
         },
         'set_location': {
             'params': 'actor_label, location',
@@ -332,6 +360,10 @@ CATALOG = {
         'connect_blueprint_pins': {
             'params': "asset_path, graph_name='EventGraph', source_node, source_pin, target_node, target_pin",
             'doc': 'Connects two pins in a Blueprint graph.',
+        },
+        'create_blueprint': {
+            'params': "asset_path, parent_class_path='/Script/Engine.Actor'",
+            'doc': 'Creates a Blueprint asset with the given parent class (default Actor).',
         },
         'get_blueprint_graph_info': {
             'params': "asset_path, graph_name='EventGraph'",
@@ -598,6 +630,10 @@ CATALOG = {
         'set_expression_property': {
             'params': 'material_path, expression_identifier, property_name, value, expression_class_name',
             'doc': "Sets an editor property on a material expression (e.g. 'r' on a Constant,",
+        },
+        'set_instance_parent': {
+            'params': 'instance_path, parent_path',
+            'doc': 'Reparents a Material Instance Constant to a new parent material/instance.',
         },
         'set_mi_scalar_param': {
             'params': 'instance_path, parameter_name, value',
