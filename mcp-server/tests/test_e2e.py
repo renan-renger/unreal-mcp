@@ -38,6 +38,8 @@ _EXCLUDE = {
     # save_current_level can raise a modal Save-As dialog on an untitled level.
     ("level", "save_current_level"),
     ("level", "save_all_levels"),
+    # vision returns an MCP Image (not a dict) — covered by a dedicated E2E test below.
+    ("vision", "capture_viewport"),
 }
 
 
@@ -103,6 +105,16 @@ def test_execute_python_round_trip():
     assert "e2e_marker_42" in blob, f"execute_python did not echo marker: {r}"
 
 
+def test_vision_capture_returns_image():
+    """vision capture_viewport returns an MCP Image (PNG) through the full chain."""
+    from fastmcp import Image
+    r = run(disp.vision.fn(action="capture_viewport", params={"width": 320, "height": 180}))
+    assert isinstance(r, Image), f"expected an Image, got {type(r).__name__}: {r}"
+    # the PNG bytes should carry a valid signature
+    data = getattr(r, "data", b"")
+    assert data[:4] == b"\x89PNG", "capture did not return a PNG"
+
+
 # ── exhaustive: every catalog action survives the full chain ───────────────────
 
 def _all_action_pairs():
@@ -129,6 +141,8 @@ def test_every_action_round_trips(domain, action):
     """
     if domain == "util":
         r = run(disp.util.fn(action=action, params={}))
+    elif domain == "vision":
+        r = run(disp.vision.fn(action=action, params={}))
     else:
         r = run(disp._dispatch(domain, action, {}))
     assert isinstance(r, dict), f"{domain}.{action} returned non-dict: {r!r}"
