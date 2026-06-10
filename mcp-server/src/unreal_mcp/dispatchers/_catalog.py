@@ -237,6 +237,10 @@ CATALOG = {
             'params': 'source_path, dest_path',
             'doc': 'Duplicates an asset to a new content-browser path.',
         },
+        'export_fbx': {
+            'params': 'asset_path, file_path',
+            'doc': 'Exports a StaticMesh, SkeletalMesh, or AnimSequence asset to an FBX file.',
+        },
         'find_by_query': {
             'params': 'name, asset_type',
             'doc': "Returns a JSON list of asset paths under '/Game' matching the given query dict.",
@@ -260,6 +264,14 @@ CATALOG = {
         'get_static_mesh_details': {
             'params': 'asset_path',
             'doc': 'Retrieves the bounding box and dimensions of a static mesh asset.',
+        },
+        'import_fbx': {
+            'params': "file_path, destination_path, destination_name='', as_skeletal=False, import_materials=False, import_textures=False, import_animations=False",
+            'doc': 'Imports an FBX file as a Static/Skeletal mesh using the legacy FBX importer.',
+        },
+        'import_texture': {
+            'params': "file_path, destination_path, destination_name=''",
+            'doc': 'Imports an image file (PNG/JPG/TGA...) as a Texture2D using the legacy texture importer.',
         },
         'list_assets': {
             'params': 'directory_path, recursive=True',
@@ -414,6 +426,32 @@ CATALOG = {
             'doc': "Sets a Blueprint variable's 'Instance Editable' and/or 'Expose On Spawn' flags.",
         },
     },
+    'control_rig': {
+        'add_rig_bone': {
+            'params': "asset_path, bone_name, parent_name='', parent_type='bone', location",
+            'doc': 'Adds a bone to a Control Rig hierarchy under an optional parent (requires the ControlRig plugin).',
+        },
+        'add_rig_null': {
+            'params': "asset_path, null_name, parent_name='', parent_type='bone', location",
+            'doc': 'Adds a null (group transform) to a Control Rig hierarchy (requires the ControlRig plugin).',
+        },
+        'add_unit_node': {
+            'params': "asset_path, struct_path, method='Execute', pos_x=0.0, pos_y=0.0",
+            'doc': "Adds a RigVM unit node by struct path (e.g. '/Script/ControlRig.RigUnit_GetTransform') to a Control Rig graph (requires the ControlRig plugin).",
+        },
+        'create_control_rig': {
+            'params': 'asset_path, skeletal_mesh_path',
+            'doc': 'Creates a Control Rig at asset_path; with a skeletal mesh, imports its bones and sets it as preview (requires the ControlRig plugin).',
+        },
+        'get_control_rig_info': {
+            'params': 'asset_path',
+            'doc': 'Returns element counts by type and the preview mesh of a Control Rig (requires the ControlRig plugin).',
+        },
+        'recompile_control_rig': {
+            'params': 'asset_path',
+            'doc': "Recompiles a Control Rig's VM and saves it (requires the ControlRig plugin).",
+        },
+    },
     'data_table': {
         'create_data_table': {
             'params': 'asset_path, row_struct_path',
@@ -449,9 +487,21 @@ CATALOG = {
         },
     },
     'editor': {
+        'create_proxy_actor': {
+            'params': 'actor_labels, base_package_name, screen_size=300, destroy_source_actors=False',
+            'doc': 'Bakes static mesh actors into ONE simplified proxy mesh (Proxy Geometry tool) and spawns it.',
+        },
         'get_selected_assets': {
             'params': '',
             'doc': 'Gets the set of currently selected assets.',
+        },
+        'join_actors': {
+            'params': "actor_labels, new_actor_label=''",
+            'doc': 'Joins static mesh actors into one actor with multiple components (no new mesh asset is baked).',
+        },
+        'merge_actors': {
+            'params': 'actor_labels, base_package_name, destroy_source_actors=False',
+            'doc': 'Merges static mesh actors into ONE new static mesh asset + actor (geometry is baked together).',
         },
         'replace_mesh_on_selected': {
             'params': 'mesh_to_be_replaced_path, new_mesh_path',
@@ -545,6 +595,14 @@ CATALOG = {
         },
     },
     'level_sequence': {
+        'add_anim_track': {
+            'params': 'asset_path, binding_name, anim_path, start_seconds, end_seconds',
+            'doc': 'Adds a skeletal-animation track playing anim_path on a binding (defaults to the playback range).',
+        },
+        'add_camera': {
+            'params': 'asset_path, spawnable=True',
+            'doc': 'Adds a CineCamera to a Level Sequence with a Camera Cut track bound to it (official create_camera path).',
+        },
         'add_possessable': {
             'params': 'asset_path, actor_label',
             'doc': 'Adds a possessable binding for an existing level actor (by World Outliner label). Returns the binding name.',
@@ -561,6 +619,14 @@ CATALOG = {
             'params': 'asset_path, binding_name',
             'doc': 'Adds a 3D transform track (with one section) to a binding.',
         },
+        'close_sequencer': {
+            'params': '',
+            'doc': 'Closes the Sequencer editor if one is open.',
+        },
+        'convert_binding': {
+            'params': "asset_path, binding_name, to='spawnable'",
+            'doc': "Converts a binding between possessable and spawnable. to='spawnable' or 'possessable'.",
+        },
         'create_level_sequence': {
             'params': 'asset_path, fps=30.0, duration_seconds=5.0',
             'doc': 'Creates a Level Sequence asset with the given frame rate and playback duration.',
@@ -568,6 +634,10 @@ CATALOG = {
         'get_sequence_info': {
             'params': 'asset_path',
             'doc': 'Returns frame rate, playback range (seconds), and the bindings of a Level Sequence.',
+        },
+        'open_in_sequencer': {
+            'params': 'asset_path',
+            'doc': 'Opens a Level Sequence in the Sequencer editor (and focuses it).',
         },
         'remove_binding': {
             'params': 'asset_path, binding_name',
@@ -660,6 +730,32 @@ CATALOG = {
             'doc': 'Sets a vector parameter on a Material Instance. Expects value as [R,G,B,A]. Returns JSON string.',
         },
     },
+    'retarget': {
+        'add_retarget_chain': {
+            'params': "ik_rig_path, chain_name, start_bone, end_bone, goal_name=''",
+            'doc': "Adds a retarget chain (e.g. 'Spine': spine_01..spine_03) to an IK Rig (requires the IKRig plugin).",
+        },
+        'auto_map_chains': {
+            'params': "retargeter_path, mode='FUZZY', force=True",
+            'doc': 'Re-runs chain mapping on an IK Retargeter. mode: FUZZY, EXACT, or CLEAR (requires the IKRig plugin).',
+        },
+        'batch_retarget': {
+            'params': "retargeter_path, anim_paths, source_mesh_path, target_mesh_path, search='', replace='', prefix='', suffix='_Retargeted'",
+            'doc': 'Duplicates and retargets animations through an IK Retargeter; returns the new asset paths (requires the IKRig plugin).',
+        },
+        'create_ik_rig': {
+            'params': 'asset_path, skeletal_mesh_path, retarget_root',
+            'doc': 'Creates an IK Rig for a skeletal mesh, optionally setting the retarget root bone (requires the IKRig plugin).',
+        },
+        'create_retargeter': {
+            'params': 'asset_path, source_ik_rig_path, target_ik_rig_path, auto_map=True',
+            'doc': 'Creates an IK Retargeter wired to source/target IK Rigs, with optional fuzzy chain auto-mapping (requires the IKRig plugin).',
+        },
+        'get_ik_rig_info': {
+            'params': 'ik_rig_path',
+            'doc': 'Returns the skeletal mesh, retarget root, and chains of an IK Rig (requires the IKRig plugin).',
+        },
+    },
     'static_mesh': {
         'add_simple_collision': {
             'params': "asset_path, shape='BOX'",
@@ -669,6 +765,10 @@ CATALOG = {
             'params': 'asset_path',
             'doc': 'Returns collision complexity and simple/convex collision counts of a StaticMesh.',
         },
+        'get_lod_screen_sizes': {
+            'params': 'asset_path',
+            'doc': 'Returns the screen-size threshold of each LOD on a StaticMesh.',
+        },
         'get_static_mesh_info': {
             'params': 'asset_path',
             'doc': 'Returns LOD/section/triangle/vertex/material counts and Nanite state of a StaticMesh.',
@@ -676,6 +776,30 @@ CATALOG = {
         'list_static_mesh_materials': {
             'params': 'asset_path',
             'doc': 'Lists the material slots of a StaticMesh (slot index + material path).',
+        },
+        'remove_collisions': {
+            'params': 'asset_path',
+            'doc': 'Removes all simple/convex collision from a StaticMesh.',
+        },
+        'remove_lods': {
+            'params': 'asset_path',
+            'doc': 'Removes all LODs except LOD 0 from a StaticMesh.',
+        },
+        'set_convex_collision': {
+            'params': 'asset_path, hull_count=4, max_hull_verts=16, hull_precision=100000',
+            'doc': 'Replaces simple collision with auto-generated convex decomposition collision.',
+        },
+        'set_lod_for_collision': {
+            'params': 'asset_path, lod_index',
+            'doc': "Sets which LOD's geometry is used for complex collision on a StaticMesh.",
+        },
+        'set_lod_from_static_mesh': {
+            'params': 'asset_path, lod_index, source_path, source_lod_index=0, reuse_existing_material_slots=True',
+            'doc': "Adds/sets a LOD on a StaticMesh using geometry from another StaticMesh's LOD.",
+        },
+        'set_lods': {
+            'params': 'asset_path, lod_settings, auto_compute_screen_size=False',
+            'doc': 'Generates LODs from reduction settings: lod_settings=[{percent_triangles, screen_size}, ...] (LOD0 first).',
         },
         'set_static_mesh_material': {
             'params': 'asset_path, slot_index, material_path',

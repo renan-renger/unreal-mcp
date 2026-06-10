@@ -70,6 +70,12 @@ import runpy; runpy.run_module("UnrealMCPython.tests.run_all", run_name="__main_
 `test_coverage.py` enforces that **every** catalog action has an in-editor test
 (or is listed in `KNOWN_UNTESTED`, which should stay empty).
 
+**E2E editor-crash guard**: if the editor dies mid-suite, the remaining E2E tests FAIL
+(autouse fixture + connection-error assertions + a final liveness canary). A green E2E
+run therefore guarantees the editor survived the whole sweep — never chain
+`pytest && git commit && gh pr create` assuming connection-error results count as
+passes. Release chains stop at the first red gate.
+
 ## Adding an action to an existing domain
 
 1. Prototype fast with `util execute_python` (arbitrary Unreal Python, seconds-scale).
@@ -148,3 +154,24 @@ string via `SerializeJsonObj`), then call it from a Python `ue_*` wrapper.
   defaults — defaults are usually `None` meaning "required".
 - Destructive editor-session actions (e.g. `create_level`/`load_level` switch/replace the open
   level) are tested via guard paths only in-editor; the happy path can reset the TCP server.
+
+### Optional-plugin dependencies (soft, never hard)
+
+Python bindings for a plugin's classes only exist when that plugin is loaded, so a
+plugin-dependent action is a **soft runtime dependency** — its absence breaks only that
+action, never the rest. The convention:
+
+- Guard at call time and return an actionable error:
+  ```python
+  if not hasattr(unreal, "IKRetargeterController"):
+      return json.dumps({"success": False,
+          "message": "Requires the IKRig plugin. Enable it in Edit > Plugins and restart."})
+  ```
+- Note the requirement in the docstring first line — `(requires the X plugin)` — so it
+  shows up in `list_actions`.
+- In-editor tests `skipTest` when the plugin isn't available.
+- **Never** add a Build.cs / .uplugin dependency on an optional plugin for C++ helpers —
+  that would make the whole plugin fail to load without it. Prefer the Python path; if C++
+  is unavoidable, use an `"Optional": true` plugin reference with conditional compilation.
+- Don't auto-enable plugins (editing .uproject is invasive and needs a restart) — the
+  guard message tells the user what to enable.
