@@ -922,8 +922,8 @@ CATALOG = {
             'doc': "Reads the current value of a console variable (CVar) as a string, e.g. 'r.ScreenPercentage'.",
         },
         'get_output_log': {
-            'params': 'line_count=50, keyword',
-            'doc': 'Returns recent lines from the Unreal Engine output log file.',
+            'params': 'line_count=50, keyword, context_lines=0',
+            'doc': 'Returns recent lines from the UE output log file; optional keyword filter with context_lines around each match.',
         },
         'get_project_info': {
             'params': '',

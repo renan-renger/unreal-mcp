@@ -5,6 +5,7 @@ import json
 import os
 import glob
 import traceback
+from collections import deque
 
 def ue_print_message(message: str = None) -> str:
     """
@@ -20,8 +21,77 @@ def ue_print_message(message: str = None) -> str:
         "source": "ue_print_message"
     })
 
-def ue_get_output_log(line_count: int = 50, keyword: str = None) -> str:
-    """Returns recent lines from the Unreal Engine output log file."""
+def _tail_log(path: str, line_count: int):
+    """Last line_count lines via backward block reads (never loads the whole file)."""
+    with open(path, 'rb') as f:
+        f.seek(0, os.SEEK_END)
+        file_size = f.tell()
+        pos = file_size
+        data = b""
+        while pos > 0 and data.count(b"\n") <= line_count:
+            step = min(65536, pos)
+            pos -= step
+            f.seek(pos)
+            data = f.read(step) + data
+        # total_lines: cheap forward newline count (no decode, no line list)
+        f.seek(0)
+        total = 0
+        last_byte = b"\n"
+        while True:
+            chunk = f.read(1 << 20)
+            if not chunk:
+                break
+            total += chunk.count(b"\n")
+            last_byte = chunk[-1:]
+        if file_size and last_byte != b"\n":
+            total += 1
+    lines = data.decode('utf-8', errors='replace').splitlines(keepends=True)
+    if pos > 0:
+        lines = lines[1:]  # the first decoded line may start mid-line — drop it
+    lines = lines[-line_count:]
+    return "".join(lines), total, len(lines)
+
+
+def _grep_log(path: str, keyword: str, line_count: int, context_lines: int):
+    """Stream-scan for keyword; keep the last line_count matched blocks with context."""
+    kw = keyword.lower()
+    prev = deque(maxlen=context_lines) if context_lines else None
+    blocks = deque(maxlen=line_count)  # each block: [(line_no, line), ...]
+    pending_after = 0
+    total = 0
+    with open(path, 'r', encoding='utf-8', errors='replace') as f:
+        for i, line in enumerate(f):
+            total = i + 1
+            if kw in line.lower():
+                if pending_after > 0 and blocks:
+                    blocks[-1].append((i, line))  # within a previous match's context: merge
+                else:
+                    block = list(prev) if prev else []
+                    block.append((i, line))
+                    blocks.append(block)
+                pending_after = context_lines
+                if prev is not None:
+                    prev.clear()
+            elif pending_after > 0:
+                blocks[-1].append((i, line))
+                pending_after -= 1
+            elif prev is not None:
+                prev.append((i, line))
+
+    parts = []
+    returned = 0
+    last_no = None
+    for block in blocks:
+        if context_lines and last_no is not None and block[0][0] > last_no + 1:
+            parts.append("--\n")
+        parts.extend(l for _, l in block)
+        returned += len(block)
+        last_no = block[-1][0]
+    return "".join(parts), total, returned
+
+
+def ue_get_output_log(line_count: int = 50, keyword: str = None, context_lines: int = 0) -> str:
+    """Returns recent lines from the UE output log file; optional keyword filter with context_lines around each match."""
     try:
         log_dir = unreal.Paths.project_log_dir()
         log_files = glob.glob(os.path.join(log_dir, "*.log"))
@@ -29,22 +99,20 @@ def ue_get_output_log(line_count: int = 50, keyword: str = None) -> str:
             return json.dumps({"success": False, "message": "No log files found"})
 
         latest_log = max(log_files, key=os.path.getmtime)
-
-        with open(latest_log, 'r', encoding='utf-8', errors='replace') as f:
-            all_lines = f.readlines()
+        line_count = max(1, int(line_count))
+        context_lines = max(0, int(context_lines))
 
         if keyword:
-            lines = [l for l in all_lines if keyword.lower() in l.lower()]
-            lines = lines[-line_count:]
+            log_text, total, returned = _grep_log(latest_log, keyword, line_count, context_lines)
         else:
-            lines = all_lines[-line_count:]
+            log_text, total, returned = _tail_log(latest_log, line_count)
 
         return json.dumps({
             "success": True,
             "log_file": os.path.basename(latest_log),
-            "total_lines": len(all_lines),
-            "returned_lines": len(lines),
-            "log": "".join(l.rstrip('\r') for l in lines)
+            "total_lines": total,
+            "returned_lines": returned,
+            "log": log_text
         })
     except Exception as e:
         return json.dumps({"success": False, "message": str(e), "traceback": traceback.format_exc()})

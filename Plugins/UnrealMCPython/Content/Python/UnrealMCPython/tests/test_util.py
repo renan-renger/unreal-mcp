@@ -15,6 +15,24 @@ class TestUtilActions(MCPTestCase):
         self.assertSuccess(r)
         self.assertIn("log", r)
 
+    def test_get_output_log_with_context(self):
+        # keyword guaranteed to exist: every editor log starts with a LogInit banner
+        r = self.call("util_actions", "ue_get_output_log",
+                      line_count=5, keyword="LogInit", context_lines=2)
+        self.assertSuccess(r)
+        self.assertIn("log", r)
+        # context expands each match, so returned_lines must exceed the bare match count
+        bare = self.call("util_actions", "ue_get_output_log",
+                         line_count=5, keyword="LogInit")
+        self.assertSuccess(bare)
+        self.assertGreaterEqual(r["returned_lines"], bare["returned_lines"])
+
+    def test_get_output_log_tail_matches_line_count(self):
+        r = self.call("util_actions", "ue_get_output_log", line_count=3)
+        self.assertSuccess(r)
+        self.assertEqual(r["returned_lines"], 3)
+        self.assertEqual(len(r["log"].splitlines()), 3)
+
     def test_print_message(self):
         r = self.call("util_actions", "ue_print_message", message="MCP unittest ping")
         self.assertSuccess(r)
