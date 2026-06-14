@@ -150,6 +150,24 @@ CATALOG = {
             'doc': '',
         },
     },
+    'anim_blueprint': {
+        'add_anim_graph_sequence_player': {
+            'params': 'asset_path, anim_sequence_path, link_to_output_pose=True',
+            'doc': 'Adds a looping Sequence Player to the AnimGraph, optionally wired to the Output Pose.',
+        },
+        'build_anim_state_machine': {
+            'params': 'asset_path, spec',
+            'doc': 'Builds an arbitrary AnimGraph state machine from a spec: states[{name,anim?}], entry?, transitions[{from,to,var?,op?,value?}].',
+        },
+        'create_anim_blueprint': {
+            'params': "asset_path, skeleton_path, parent_class_path='/Script/Engine.AnimInstance'",
+            'doc': 'Creates an Animation Blueprint bound to a Skeleton (parent defaults to AnimInstance).',
+        },
+        'get_anim_blueprint_info': {
+            'params': 'asset_path',
+            'doc': "Returns an AnimBlueprint's target skeleton, generated class, and graph names.",
+        },
+    },
     'animation': {
         'add_float_curve': {
             'params': 'asset_path, curve_name, time_seconds, value',
@@ -957,6 +975,10 @@ CATALOG = {
             'params': '',
             'doc': 'Saves all dirty packages (modified maps and content).',
         },
+        'screen_to_world': {
+            'params': 'x, y, distance=1000.0',
+            'doc': "Deprojects a viewport pixel (x, y) to a world location at 'distance' along the view ray.",
+        },
         'set_viewport_camera': {
             'params': 'location, rotation',
             'doc': 'Sets the level viewport camera. location=[x,y,z], rotation=[pitch,yaw,roll].',
@@ -968,6 +990,10 @@ CATALOG = {
         'stop_pie': {
             'params': '',
             'doc': 'Stops Play-In-Editor.',
+        },
+        'world_to_screen': {
+            'params': 'location',
+            'doc': 'Projects a world location to active level-viewport pixel coords (editor viewport, no PIE needed).',
         },
     },
     'vision': {

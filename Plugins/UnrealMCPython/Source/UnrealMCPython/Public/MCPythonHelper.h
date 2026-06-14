@@ -304,4 +304,31 @@ public:
 
     /** C++ side: drop any stale submitted result before executing a call. */
     static void ClearSubmittedResult();
+
+    // ─── AnimGraph authoring (editor-only AnimGraph module) ───────────────────────
+    // AnimGraph node classes (UAnimGraphNode_*) live in the editor-only AnimGraph
+    // module and are not exposed to Python, and UAnimationGraph::Nodes is protected,
+    // so these operations need C++. Read-only AnimGraph introspection is already
+    // served by GetBlueprintGraphInfo (graph_name="AnimGraph").
+
+    /** Add a Sequence Player node to the AnimGraph, optionally linked to the Output Pose. Returns JSON. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static FString AddAnimGraphSequencePlayer(UAnimBlueprint* AnimBP, const FString& AnimSequencePath, bool bLinkToOutputPose);
+
+    /** Build an arbitrary state machine in the AnimGraph from a JSON spec
+        ({states:[{name,anim?}], entry?, transitions:[{from,to,var?,op?,value?}]}). Returns JSON. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static FString BuildAnimStateMachine(UAnimBlueprint* AnimBP, const FString& SpecJson);
+
+    // ─── Editor viewport projection ───────────────────────────────────────────────
+    // FEditorViewportClient / FSceneView are not exposed to Python, so world<->screen
+    // projection against the active level editor viewport needs C++.
+
+    /** Project a world location to active-level-viewport pixel coords. Returns JSON {x,y,visible,viewport_*}. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static FString WorldToScreen(FVector WorldLocation);
+
+    /** Deproject a viewport pixel to a world location at the given distance along the view ray. Returns JSON. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static FString ScreenToWorld(float ScreenX, float ScreenY, float Distance);
 };
