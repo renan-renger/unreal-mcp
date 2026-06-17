@@ -150,6 +150,24 @@ CATALOG = {
             'doc': '',
         },
     },
+    'anim_blueprint': {
+        'add_anim_graph_sequence_player': {
+            'params': 'asset_path, anim_sequence_path, link_to_output_pose=True',
+            'doc': 'Adds a looping Sequence Player to the AnimGraph, optionally wired to the Output Pose.',
+        },
+        'build_anim_state_machine': {
+            'params': 'asset_path, spec',
+            'doc': 'Builds an arbitrary AnimGraph state machine from a spec: states[{name,anim?}], entry?, transitions[{from,to,var?,op?,value?}].',
+        },
+        'create_anim_blueprint': {
+            'params': "asset_path, skeleton_path, parent_class_path='/Script/Engine.AnimInstance'",
+            'doc': 'Creates an Animation Blueprint bound to a Skeleton (parent defaults to AnimInstance).',
+        },
+        'get_anim_blueprint_info': {
+            'params': 'asset_path',
+            'doc': "Returns an AnimBlueprint's target skeleton, generated class, and graph names.",
+        },
+    },
     'animation': {
         'add_float_curve': {
             'params': 'asset_path, curve_name, time_seconds, value',
@@ -257,6 +275,10 @@ CATALOG = {
             'params': 'asset_path',
             'doc': 'Lists packages that the given asset depends on (references).',
         },
+        'get_gltf_import_status': {
+            'params': 'destination_path',
+            'doc': 'Polls a scheduled glTF import; returns done + imported assets once Interchange finishes.',
+        },
         'get_metadata_tag': {
             'params': 'asset_path, tag',
             'doc': 'Reads a metadata tag value on an asset (empty string if unset).',
@@ -268,6 +290,10 @@ CATALOG = {
         'import_fbx': {
             'params': "file_path, destination_path, destination_name='', as_skeletal=False, import_materials=False, import_textures=False, import_animations=False",
             'doc': 'Imports an FBX file as a Static/Skeletal mesh using the legacy FBX importer.',
+        },
+        'import_gltf': {
+            'params': 'file_path, destination_path',
+            'doc': 'Imports a .glb/.gltf via Interchange, deferred to the editor tick. Poll get_gltf_import_status for the result.',
         },
         'import_texture': {
             'params': "file_path, destination_path, destination_name=''",
@@ -487,9 +513,17 @@ CATALOG = {
         },
     },
     'editor': {
+        'close_asset_editor': {
+            'params': 'asset_path',
+            'doc': 'Closes any open editor for the given asset.',
+        },
         'create_proxy_actor': {
             'params': 'actor_labels, base_package_name, screen_size=300, destroy_source_actors=False',
             'doc': 'Bakes static mesh actors into ONE simplified proxy mesh (Proxy Geometry tool) and spawns it.',
+        },
+        'get_open_assets': {
+            'params': '',
+            'doc': 'Lists assets that currently have an editor open.',
         },
         'get_selected_assets': {
             'params': '',
@@ -502,6 +536,10 @@ CATALOG = {
         'merge_actors': {
             'params': 'actor_labels, base_package_name, destroy_source_actors=False',
             'doc': 'Merges static mesh actors into ONE new static mesh asset + actor (geometry is baked together).',
+        },
+        'open_editor_for_asset': {
+            'params': 'asset_path',
+            'doc': 'Opens the asset-specific editor (Blueprint, Material, etc.) for an asset.',
         },
         'replace_mesh_on_selected': {
             'params': 'mesh_to_be_replaced_path, new_mesh_path',
@@ -536,6 +574,52 @@ CATALOG = {
         'set_game_mode': {
             'params': 'game_mode_class_path',
             'doc': "Sets the GameMode Override on the current level's World Settings.",
+        },
+    },
+    'gas': {
+        'add_effect_modifier': {
+            'params': "asset_path, attribute_set_path, attribute_name, op='add_base', magnitude=1.0",
+            'doc': 'Appends an attribute modifier (e.g. Health add_base +25) to a GameplayEffect. attribute_set_path is the AttributeSet class path (requires the GameplayAbilities plugin).',
+        },
+        'add_gameplay_tag': {
+            'params': "tag, comment=''",
+            'doc': 'Registers a gameplay tag in Config/DefaultGameplayTags.ini — takes effect after an editor restart (requires the GameplayAbilities plugin).',
+        },
+        'clear_effect_modifiers': {
+            'params': 'asset_path',
+            'doc': 'Removes all modifiers from a GameplayEffect blueprint (requires the GameplayAbilities plugin).',
+        },
+        'create_ability_blueprint': {
+            'params': 'asset_path, parent_class_path',
+            'doc': 'Creates a GameplayAbility blueprint; parent_class_path may point at a custom GA subclass (requires the GameplayAbilities plugin).',
+        },
+        'create_effect_blueprint': {
+            'params': "asset_path, duration_policy='instant', duration_seconds",
+            'doc': 'Creates a GameplayEffect blueprint with a duration policy: instant, has_duration (+seconds), or infinite (requires the GameplayAbilities plugin).',
+        },
+        'get_ability_info': {
+            'params': 'asset_path',
+            'doc': 'Returns parent class, ability tags, and cost/cooldown effect classes of a GameplayAbility blueprint (requires the GameplayAbilities plugin).',
+        },
+        'get_effect_info': {
+            'params': 'asset_path',
+            'doc': 'Returns duration policy/seconds and decoded modifiers of a GameplayEffect blueprint (requires the GameplayAbilities plugin).',
+        },
+        'list_gameplay_tags': {
+            'params': "prefix=''",
+            'doc': 'Lists gameplay tags registered in Config/DefaultGameplayTags.ini, optionally filtered by prefix (requires the GameplayAbilities plugin).',
+        },
+        'set_ability_costs': {
+            'params': 'asset_path, cost_effect_path, cooldown_effect_path',
+            'doc': 'Wires cost and/or cooldown GameplayEffect blueprints onto a GameplayAbility (requires the GameplayAbilities plugin).',
+        },
+        'set_ability_tags': {
+            'params': 'asset_path, tags',
+            'doc': 'Sets the AbilityTags container on a GameplayAbility; unregistered tags are reported, not silently dropped (requires the GameplayAbilities plugin).',
+        },
+        'set_effect_duration': {
+            'params': 'asset_path, duration_policy, duration_seconds',
+            'doc': "Changes a GameplayEffect's duration policy (instant / has_duration+seconds / infinite) (requires the GameplayAbilities plugin).",
         },
     },
     'layer': {
@@ -825,6 +909,10 @@ CATALOG = {
             'params': 'asset_path, widget_type, widget_name, parent_name',
             'doc': '',
         },
+        'bind_widget_event': {
+            'params': 'asset_path, widget_name, event_name',
+            'doc': "Creates a bound event node in the widget BP's event graph for a widget delegate (e.g. Button OnClicked).",
+        },
         'compile_widget_blueprint': {
             'params': 'asset_path',
             'doc': '',
@@ -841,9 +929,21 @@ CATALOG = {
             'params': 'asset_path, widget_name, property_name',
             'doc': 'Gets the value of a C++ UPROPERTY on a named widget.',
         },
+        'list_widget_events': {
+            'params': 'asset_path, widget_name',
+            'doc': 'Lists the bindable multicast-delegate events on a widget (e.g. OnClicked, OnHovered).',
+        },
         'remove_widget': {
             'params': 'asset_path, widget_name',
             'doc': '',
+        },
+        'reparent_widget': {
+            'params': 'asset_path, widget_name, new_parent_name',
+            'doc': 'Moves a widget under a different panel parent (cycle-guarded).',
+        },
+        'replace_widget': {
+            'params': 'asset_path, widget_name, new_type, new_name',
+            'doc': 'Replaces a widget with a new widget of new_type at the same slot (old subtree discarded).',
         },
         'set_slot_layout': {
             'params': 'asset_path, widget_name, anchor_min_x=0.5, anchor_min_y=0.5, anchor_max_x=0.5, anchor_max_y=0.5, offset_x=0.0, offset_y=0.0, size_x=100.0, size_y=40.0',
@@ -861,6 +961,10 @@ CATALOG = {
             'params': 'asset_path, widget_name, property_name, value',
             'doc': 'Sets a C++ UPROPERTY on a named widget from a string value.',
         },
+        'wrap_widget': {
+            'params': 'asset_path, widget_name, wrapper_type, wrapper_name',
+            'doc': "Wraps a widget in a new panel (wrapper_type, e.g. 'VerticalBox') that takes its place.",
+        },
     },
     'util': {
         'execute_console_command': {
@@ -876,8 +980,8 @@ CATALOG = {
             'doc': "Reads the current value of a console variable (CVar) as a string, e.g. 'r.ScreenPercentage'.",
         },
         'get_output_log': {
-            'params': 'line_count=50, keyword',
-            'doc': 'Returns recent lines from the Unreal Engine output log file.',
+            'params': 'line_count=50, keyword, context_lines=0',
+            'doc': 'Returns recent lines from the UE output log file; optional keyword filter with context_lines around each match.',
         },
         'get_project_info': {
             'params': '',
@@ -911,6 +1015,18 @@ CATALOG = {
             'params': '',
             'doc': 'Saves all dirty packages (modified maps and content).',
         },
+        'screen_to_world': {
+            'params': 'x, y, distance=1000.0',
+            'doc': "Deprojects a viewport pixel (x, y) to a world location at 'distance' along the view ray.",
+        },
+        'set_cvar': {
+            'params': 'name, value',
+            'doc': "Sets a console variable, e.g. name='r.ScreenPercentage', value='75'. Reads it back to confirm.",
+        },
+        'set_log_verbosity': {
+            'params': 'category, verbosity',
+            'doc': "Sets a log category's verbosity via the 'Log' console command (e.g. 'LogBlueprint', 'Verbose').",
+        },
         'set_viewport_camera': {
             'params': 'location, rotation',
             'doc': 'Sets the level viewport camera. location=[x,y,z], rotation=[pitch,yaw,roll].',
@@ -922,6 +1038,10 @@ CATALOG = {
         'stop_pie': {
             'params': '',
             'doc': 'Stops Play-In-Editor.',
+        },
+        'world_to_screen': {
+            'params': 'location',
+            'doc': 'Projects a world location to active level-viewport pixel coords (editor viewport, no PIE needed).',
         },
     },
     'vision': {

@@ -27,6 +27,7 @@ OUTPUT = MCP_SERVER_DIR / "src" / "unreal_mcp" / "dispatchers" / "_catalog.py"
 # Domain → plugin action file (module is UnrealMCPython.<file stem>)
 DOMAINS = [
     "actor",
+    "anim_blueprint",
     "animation",
     "asset",
     "behavior_tree",
@@ -35,6 +36,7 @@ DOMAINS = [
     "data_table",
     "editor",
     "game",
+    "gas",
     "layer",
     "level",
     "level_sequence",

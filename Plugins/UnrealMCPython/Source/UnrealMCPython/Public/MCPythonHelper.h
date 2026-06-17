@@ -215,6 +215,26 @@ public:
     UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
     static FString UmgSetWidgetProperty(UBlueprint* WidgetBP, const FString& WidgetName, const FString& PropertyName, const FString& Value);
 
+    /** Move a widget under a different panel parent (preserves the widget; cycle-guarded). Returns JSON. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static FString UmgReparentWidget(UBlueprint* WidgetBP, const FString& WidgetName, const FString& NewParentName);
+
+    /** Wrap a widget in a newly-created panel of WrapperType, taking the widget's place in the tree. Returns JSON. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static FString UmgWrapWidget(UBlueprint* WidgetBP, const FString& WidgetName, const FString& WrapperType, const FString& WrapperName);
+
+    /** Replace a widget with a new widget of NewType at the same slot (old subtree is discarded). Returns JSON. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static FString UmgReplaceWidget(UBlueprint* WidgetBP, const FString& WidgetName, const FString& NewType, const FString& NewName);
+
+    /** List the bindable multicast-delegate events on a widget (e.g. OnClicked). Returns JSON. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static FString UmgListWidgetEvents(UBlueprint* WidgetBP, const FString& WidgetName);
+
+    /** Create a bound event node in the widget BP's event graph for a widget's delegate. Returns JSON. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static FString UmgBindWidgetEvent(UBlueprint* WidgetBP, const FString& WidgetName, const FString& EventName);
+
     /** Add a component to a Blueprint's SCS.
      *  ComponentClassPath e.g. "/Script/Engine.CameraComponent"
      *  ParentComponentName: name of the parent SCS node, or "" to attach to root */
@@ -281,4 +301,54 @@ public:
     /** Remove a named socket from a SkeletalMesh. Returns JSON. */
     UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
     static FString RemoveSkeletalMeshSocket(USkeletalMesh* Mesh, const FString& SocketName);
+
+    // ─── Response transport (python_call) ─────────────────────────────────────
+    // The python_call path used to transport results via print() + a GLog capture
+    // device. Because the capture device only ADDS to GLog routing, every response
+    // was also echoed into the Output Log / log file — including megabyte base64
+    // payloads from vision captures, and get_output_log responses re-echoing
+    // themselves into ever-deeper escaping. submit_result hands the JSON straight
+    // to the server instead, so responses never touch the log.
+    //
+    // Thread-safety: a single static slot is sufficient because each request is one
+    // game-thread task — the write (last python statement) and the read (right
+    // after ExecPythonCommandEx returns) are adjacent within that task, and any
+    // re-entrant nested request completes atomically in between, never partially.
+
+    /** Called by generated python_call code to hand the action's JSON result back. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static void SubmitResult(const FString& ResultJson);
+
+    /** C++ side: move the submitted result out (returns false if nothing was submitted). */
+    static bool ConsumeSubmittedResult(FString& OutResult);
+
+    /** C++ side: drop any stale submitted result before executing a call. */
+    static void ClearSubmittedResult();
+
+    // ─── AnimGraph authoring (editor-only AnimGraph module) ───────────────────────
+    // AnimGraph node classes (UAnimGraphNode_*) live in the editor-only AnimGraph
+    // module and are not exposed to Python, and UAnimationGraph::Nodes is protected,
+    // so these operations need C++. Read-only AnimGraph introspection is already
+    // served by GetBlueprintGraphInfo (graph_name="AnimGraph").
+
+    /** Add a Sequence Player node to the AnimGraph, optionally linked to the Output Pose. Returns JSON. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static FString AddAnimGraphSequencePlayer(UAnimBlueprint* AnimBP, const FString& AnimSequencePath, bool bLinkToOutputPose);
+
+    /** Build an arbitrary state machine in the AnimGraph from a JSON spec
+        ({states:[{name,anim?}], entry?, transitions:[{from,to,var?,op?,value?}]}). Returns JSON. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static FString BuildAnimStateMachine(UAnimBlueprint* AnimBP, const FString& SpecJson);
+
+    // ─── Editor viewport projection ───────────────────────────────────────────────
+    // FEditorViewportClient / FSceneView are not exposed to Python, so world<->screen
+    // projection against the active level editor viewport needs C++.
+
+    /** Project a world location to active-level-viewport pixel coords. Returns JSON {x,y,visible,viewport_*}. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static FString WorldToScreen(FVector WorldLocation);
+
+    /** Deproject a viewport pixel to a world location at the given distance along the view ray. Returns JSON. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static FString ScreenToWorld(float ScreenX, float ScreenY, float Distance);
 };

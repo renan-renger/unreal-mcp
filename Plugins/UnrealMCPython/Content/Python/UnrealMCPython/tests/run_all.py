@@ -17,6 +17,7 @@ import unittest
 _MODULES = [
     "UnrealMCPython.tests.test_util",
     "UnrealMCPython.tests.test_actor",
+    "UnrealMCPython.tests.test_anim_blueprint",
     "UnrealMCPython.tests.test_animation",
     "UnrealMCPython.tests.test_asset",
     "UnrealMCPython.tests.test_level",
@@ -33,6 +34,7 @@ _MODULES = [
     "UnrealMCPython.tests.test_texture",
     "UnrealMCPython.tests.test_retarget",
     "UnrealMCPython.tests.test_control_rig",
+    "UnrealMCPython.tests.test_gas",
     "UnrealMCPython.tests.test_vision",
 ]
 
