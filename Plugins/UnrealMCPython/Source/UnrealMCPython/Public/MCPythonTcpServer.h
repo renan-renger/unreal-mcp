@@ -55,5 +55,7 @@ private:
 	void SendJsonResponse(TSharedPtr<FJsonObject> ResponseJson, FSocket* ClientSocket, bool bCloseSocket = true);
 
 	// Native command handlers
+#if WITH_LIVE_CODING
 	void HandleLiveCodingCompile(TSharedPtr<FJsonObject> JsonObj, FSocket* ClientSocket);
+#endif // WITH_LIVE_CODING
 };

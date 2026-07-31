@@ -10,7 +10,9 @@
 #include "Serialization/JsonReader.h"
 #include "MCPythonHelper.h"
 #include "Dom/JsonObject.h"
+#if WITH_LIVE_CODING
 #include "ILiveCodingModule.h"
+#endif // WITH_LIVE_CODING
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -20,6 +22,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogMCPython, Log, All);
 
 namespace
 {
+#if WITH_LIVE_CODING
     // Accumulates lines emitted under the LogLiveCoding log category while a live
     // coding compile runs. Live Coding dispatches compiler output from worker threads,
     // so Serialize must be callable from any thread.
@@ -97,6 +100,7 @@ namespace
 
         return FString::Join(DiagnosticLines, TEXT("\n"));
     }
+#endif // WITH_LIVE_CODING
 }
 
 // Helper function to convert FJsonValue to Python literal string
@@ -177,10 +181,12 @@ FMCPythonTcpServer::~FMCPythonTcpServer() { Stop(); }
 
 void FMCPythonTcpServer::RegisterNativeHandlers()
 {
+#if WITH_LIVE_CODING
     NativeHandlers.Add(TEXT("livecoding_compile"), [this](TSharedPtr<FJsonObject> JsonObj, FSocket* ClientSocket)
     {
         HandleLiveCodingCompile(JsonObj, ClientSocket);
     });
+#endif // WITH_LIVE_CODING
 }
 
 void FMCPythonTcpServer::SendJsonResponse(TSharedPtr<FJsonObject> ResponseJson, FSocket* ClientSocket, bool bCloseSocket)
@@ -278,7 +284,7 @@ bool FMCPythonTcpServer::HandleIncomingConnection(FSocket* ClientSocket, const F
             ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(ClientSocket);
             return;
         }
-        ReceivedData.Add(NULL);
+        ReceivedData.Add(0);
 
         FString ReceivedString = FString(UTF8_TO_TCHAR(reinterpret_cast<const char*>(ReceivedData.GetData())));
 
@@ -546,6 +552,7 @@ void FMCPythonTcpServer::ProcessDataOnGameThread(const FString& Data, FSocket* C
     ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(ClientSocket);
 }
 
+#if WITH_LIVE_CODING
 void FMCPythonTcpServer::HandleLiveCodingCompile(TSharedPtr<FJsonObject> JsonObj, FSocket* ClientSocket)
 {
     ILiveCodingModule* LiveCoding = FModuleManager::GetModulePtr<ILiveCodingModule>(TEXT("LiveCoding"));
@@ -631,3 +638,4 @@ void FMCPythonTcpServer::HandleLiveCodingCompile(TSharedPtr<FJsonObject> JsonObj
 
     SendJsonResponse(Response, ClientSocket);
 }
+#endif // WITH_LIVE_CODING
