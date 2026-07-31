@@ -17,6 +17,12 @@ name: E2E (self-hosted Unreal)
 #   - Install `uv` on the runner (https://docs.astral.sh/uv/)
 #   - Set repo variable UE_ROOT to the engine root, e.g. C:\Program Files\Epic Games\UE_5.5
 #     (Settings → Secrets and variables → Actions → Variables), or pass engine_root on dispatch.
+#
+# This job is Windows-specific: pwsh steps and Engine\Binaries\Win64 paths. The plugin also
+# builds and runs on the Linux editor, but there is no Linux self-hosted runner, so gates 3
+# and 4 are Windows-only in CI. Running them on Linux means a runner labelled
+# [self-hosted, Linux, unreal] with `shell: bash` and Engine/Binaries/Linux/UnrealEditor{,-Cmd}.
+# Gates 1 and 2 already run on Linux for every push via test.yml.
 
 on:
   workflow_dispatch:

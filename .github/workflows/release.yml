@@ -76,6 +76,9 @@ jobs:
           VER="${{ steps.version.outputs.ver }}"
           # Source-only zip; named to match the precompiled binaries
           # (UnrealMCPython_<engine>_<ver>.zip) so the "Source" variant is obvious.
+          # Precompiled plugins cannot be built here (hosted runners have no Unreal
+          # Engine) — maintainers build and upload them per platform from a machine
+          # with the engine: tools/build-plugin.ps1 (Win64), tools/build-plugin.sh (Linux).
           ZIP_NAME="UnrealMCPython_Source_${VER}.zip"
           STAGE_DIR=$(mktemp -d)
           TARGET="$STAGE_DIR/UnrealMCPython"
