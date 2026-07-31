@@ -55,6 +55,39 @@ def _unwrap_result(response: dict) -> dict:
     return response
 
 
+_LIVE_CODING_UNAVAILABLE = (
+    "Live Coding is unavailable in this editor build (Windows only). "
+    "Rebuild the editor target with the editor closed to pick up C++ changes."
+)
+
+
+def _livecoding_result(response: dict) -> dict:
+    """
+    Resolve a livecoding_compile response into the real compile verdict.
+
+    An editor built without Live Coding (Linux — WITH_LIVE_CODING=0) registers
+    no native handler, so the server answers on the generic python path: the
+    outer "success" only means "Python ran" and the verdict is the JSON string
+    in "result". Without unwrapping, a missing handler reads as a clean compile.
+
+    Raises:
+        UnrealExecutionError: if the compile failed, or Live Coding is absent.
+    """
+    if isinstance(response, dict) and response.get("success") is False:
+        raise UnrealExecutionError(
+            response.get("message", "LiveCoding compile failed."),
+            details=response
+        )
+
+    result = _unwrap_result(response)
+    if isinstance(result, dict) and result.get("success") is False:
+        message = result.get("message", "LiveCoding compile failed.")
+        if "Unsupported type" in message:
+            message = _LIVE_CODING_UNAVAILABLE
+        raise UnrealExecutionError(message, details=result)
+    return result
+
+
 # Core send_to_unreal function
 async def send_to_unreal(action_module: str, action_name: str, params: dict) -> dict:
     """
@@ -217,13 +250,7 @@ async def send_livecoding_compile() -> dict:
 
             response_str = response_buffer.decode('utf-8')
             response_json = json.loads(response_str)
-
-            if isinstance(response_json, dict) and response_json.get("success") is False:
-                raise UnrealExecutionError(
-                    response_json.get("message", "LiveCoding compile failed."),
-                    details=response_json
-                )
-            return response_json
+            return _livecoding_result(response_json)
 
     except socket.timeout:
         raise UnrealExecutionError(

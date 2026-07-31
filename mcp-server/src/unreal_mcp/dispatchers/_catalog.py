@@ -1005,7 +1005,7 @@ CATALOG = {
         },
         'livecoding_compile': {
             'params': '',
-            'doc': 'Triggers C++ Live Coding and waits for the compile result.',
+            'doc': 'Triggers C++ Live Coding and waits for the compile result (Windows only).',
         },
         'print_message': {
             'params': 'message',

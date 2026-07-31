@@ -2,7 +2,9 @@
 
 """Unit tests for the TCP response unwrapping (offline, no Unreal)."""
 
-from unreal_mcp.core import _unwrap_result
+import pytest
+
+from unreal_mcp.core import _livecoding_result, _unwrap_result, UnrealExecutionError
 
 
 def test_unwraps_action_dict_from_result_string():
@@ -43,3 +45,35 @@ def test_missing_result_returns_original():
 
 def test_non_dict_passthrough():
     assert _unwrap_result("raw") == "raw"
+
+
+# ─── livecoding_compile verdict ───────────────────────────────────────────────
+
+def test_livecoding_success_passes_through():
+    """The native handler answers directly — no 'result' string to unwrap."""
+    wire = {"success": True, "compile_result": "Success", "message": "Compilation succeeded in 4.2 seconds."}
+    assert _livecoding_result(wire) == wire
+
+
+def test_livecoding_outer_failure_raises():
+    wire = {"success": False, "message": "Live Coding module is not loaded."}
+    with pytest.raises(UnrealExecutionError, match="not loaded"):
+        _livecoding_result(wire)
+
+
+def test_livecoding_missing_handler_raises_actionable_error():
+    """Editor built without Live Coding (Linux): the generic python path replies
+    success=True (Python ran) with the real verdict inside 'result'."""
+    wire = {
+        "success": True,
+        "message": "Failed: Unsupported type: livecoding_compile",
+        "result": '{"success": false, "message": "Unsupported type: livecoding_compile"}',
+    }
+    with pytest.raises(UnrealExecutionError, match="Windows only"):
+        _livecoding_result(wire)
+
+
+def test_livecoding_inner_compile_failure_raises():
+    wire = {"success": True, "result": '{"success": false, "message": "Compilation failed."}'}
+    with pytest.raises(UnrealExecutionError, match="Compilation failed"):
+        _livecoding_result(wire)
