@@ -23,10 +23,29 @@ import pytest
 
 from unreal_mcp.dispatchers._catalog import CATALOG
 
-PLUGIN_TESTS = (
-    Path(__file__).resolve().parents[2]
-    / "Plugins" / "UnrealMCPython" / "Content" / "Python" / "UnrealMCPython" / "tests"
+_PLUGIN_TESTS_REL = (
+    Path("Plugins") / "UnrealMCPython" / "Content" / "Python" / "UnrealMCPython" / "tests"
 )
+
+
+def _find_plugin_tests() -> Path:
+    """Locate the in-editor test dir by walking up, not by a fixed parent depth.
+
+    In this repo mcp-server/ sits at the root, so the plugin is two levels up. A
+    project that vendors the server nests it deeper (MadorasRebirth keeps it under
+    Tools/unreal-mcpython/), and a hardcoded parents[2] then resolves to a path that
+    does not exist — which fails the whole coverage gate for a layout reason rather
+    than a coverage one. Falling back to parents[2] keeps the guard below reporting a
+    meaningful path when the plugin genuinely is not there.
+    """
+    for base in Path(__file__).resolve().parents:
+        candidate = base / _PLUGIN_TESTS_REL
+        if candidate.is_dir():
+            return candidate
+    return Path(__file__).resolve().parents[2] / _PLUGIN_TESTS_REL
+
+
+PLUGIN_TESTS = _find_plugin_tests()
 
 # Actions not routed as ue_<action> over TCP — covered by mcp-server pytest instead.
 SPECIAL = {"util": {"execute_python", "livecoding_compile"}}
