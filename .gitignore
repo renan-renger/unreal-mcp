@@ -62,6 +62,11 @@ Binaries/
 Intermediate/
 Saved/
 
+# Assets created by the in-editor test suite. Generated artifacts, not content:
+# every run recreates them, and some (e.g. a read StateTree) stay rooted and
+# survive their own teardown.
+Content/Tests/
+
 # Ignore precompiled headers and auto-generated code
 *.pch
 *.obj
