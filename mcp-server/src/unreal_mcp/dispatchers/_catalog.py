@@ -840,6 +840,24 @@ CATALOG = {
             'doc': 'Returns the skeletal mesh, retarget root, and chains of an IK Rig (requires the IKRig plugin).',
         },
     },
+    'state_tree': {
+        'get_state_details': {
+            'params': 'asset_path, state_path',
+            'doc': 'Full detail of one state including task parameters (requires the StateTree plugin).',
+        },
+        'get_state_tree_structure': {
+            'params': 'asset_path',
+            'doc': "Dumps a StateTree's full state hierarchy, tasks and transitions (requires the StateTree plugin).",
+        },
+        'lint_state_tree': {
+            'params': 'asset_path',
+            'doc': 'Flags StateTree authoring traps: dead-end empty states, finishing global tasks (requires the StateTree plugin).',
+        },
+        'list_state_trees': {
+            'params': "path='/Game'",
+            'doc': 'Lists every StateTree asset under a content path (requires the StateTree plugin).',
+        },
+    },
     'static_mesh': {
         'add_simple_collision': {
             'params': "asset_path, shape='BOX'",

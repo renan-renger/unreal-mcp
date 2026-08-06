@@ -42,6 +42,7 @@ DOMAINS = [
     "level_sequence",
     "material",
     "retarget",
+    "state_tree",
     "static_mesh",
     "texture",
     "umg",
