@@ -14,9 +14,11 @@ Request path: `LLM → FastMCP dispatcher → TCP :12029 → C++ server → ue_*
 
 ## Architecture (the non-obvious parts)
 
-**Namespace dispatcher, not one-tool-per-action.** The MCP surface is **10 domain tools**
-(`actor`, `asset`, `behavior_tree`, `blueprint`, `editor`, `game`, `level`, `material`,
-`umg`, `util`), each taking `(action, params)`. This keeps the tool-list context cost fixed
+**Namespace dispatcher, not one-tool-per-action.** The MCP surface is **21 domain tools**
+(one per key of `CATALOG`: `actor`, `anim_blueprint`, `animation`, `asset`, `behavior_tree`,
+`blueprint`, `control_rig`, `data_table`, `editor`, `game`, `gas`, `layer`, `level`,
+`level_sequence`, `material`, `retarget`, `static_mesh`, `texture`, `umg`, `util`,
+`vision`), each taking `(action, params)`. This keeps the tool-list context cost fixed
 no matter how many actions exist. `action="list_actions"` returns a domain's catalog.
 See `mcp-server/src/unreal_mcp/dispatcher.py`.
 
@@ -139,13 +141,23 @@ string via `SerializeJsonObj`), then call it from a Python `ue_*` wrapper.
 
 **Build cycle — this matters:**
 - Editing an existing function *body* → `util livecoding_compile` hot-patches the
-  running editor. Fast.
+  running editor. Fast. **Windows only** (see below).
 - **Adding a new UFUNCTION** (new reflection) → Live Coding compiles but does NOT
-  register it. You must do a full UBT build with the editor **closed**:
-  1. Close the editor completely (verify no `UnrealEditor.exe` remains).
-  2. `"<UE>/Engine/Build/BatchFiles/Build.bat" UnrealEditor Win64 Development -project="<repo>/UnrealMCPSample.uproject" -waitmutex`
-     (this is a plugin-only project — there is no project-level target).
+  register it. You must do a full UBT build with the editor **closed**
+  (this is a plugin-only project — there is no project-level target):
+  1. Close the editor completely (verify no `UnrealEditor` process remains).
+  2. Build the editor target for your platform:
+     - Windows — `"<UE>/Engine/Build/BatchFiles/Build.bat" UnrealEditor Win64 Development -project="<repo>/UnrealMCPSample.uproject" -waitmutex`
+     - Linux — `"<UE>/Engine/Build/BatchFiles/Linux/Build.sh" UnrealEditor Linux Development -project="<repo>/UnrealMCPSample.uproject" -waitmutex`
   3. Reopen the editor; the new UFUNCTION is now callable from Python.
+
+**Platform note — Live Coding is Windows-only.** The module does not exist on
+Linux, so everything Live Coding is compiled out behind `WITH_LIVE_CODING`
+(`.Build.cs` adds the dependency only under `Target.bWithLiveCoding`; the TCP
+handler, its log capture and `HandleLiveCodingCompile` are `#if`-guarded). On a
+Linux editor `util livecoding_compile` therefore fails with an actionable
+message instead of silently reporting a clean compile, and **every** C++ change —
+not just a new UFUNCTION — needs the full editor-closed rebuild above.
 
 ## Conventions
 

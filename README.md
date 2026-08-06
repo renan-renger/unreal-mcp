@@ -52,7 +52,7 @@ Each row is one **namespace tool**. The action set is large but the tool list st
 | **asset** | Duplicate/rename/delete/save, list, dependencies & referencers, metadata tags, directories, search, FBX import/export, texture import, glTF/glb import. | 21 |
 | **material** | Create materials & instances, author expression graphs, connect to material properties, MI parameters (scalar/vector/texture/switch), reparent, auto-layout, introspection. | 20 |
 | **blueprint** | Create Blueprints, read/build graphs, add/connect/remove nodes, member variables (+ flags), SCS components, compile, auto-layout. | 19 |
-| **util** | Run arbitrary Unreal Python, console commands, CVar get/set, world↔screen projection, viewport camera, PIE control, project info, class/enum reflection, output log, log verbosity, LiveCoding compile. | 19 |
+| **util** | Run arbitrary Unreal Python, console commands, CVar get/set, world↔screen projection, viewport camera, PIE control, project info, class/enum reflection, output log, log verbosity, LiveCoding compile (Windows only). | 19 |
 | **animation** | AnimSequence info, notify tracks, sync markers, float curves; SkeletalMesh sockets & bones (C++-backed); skeleton info. | 17 |
 | **umg** | Create Widget Blueprints, add/remove widgets, reparent/wrap/replace, properties, slot layout, text style, event binding, compile. | 15 |
 | **level_sequence** | Create cinematics, camera with Camera Cut track, spawnable/possessable bindings, transform & skeletal-anim tracks, keyframes, Sequencer open/close. | 13 |
@@ -108,7 +108,7 @@ expose, an optional C++ helper (`MCPythonHelper`) is available. Full details in
 
 ### Prerequisites
 
-- **Unreal Engine** 5.6+
+- **Unreal Engine** 5.6+ — Windows (Win64) or Linux editor
 - **Python** 3.11+
 - **[uv](https://docs.astral.sh/uv/)** — fast Python package manager
 - An **MCP client** (Claude Desktop, VS Code, Cursor, etc.)
@@ -119,7 +119,7 @@ expose, an optional C++ helper (`MCPythonHelper`) is available. Full details in
 
 Each [release](https://github.com/GenOrca/unreal-mcp/releases) ships two kinds of plugin asset. **Most users want the precompiled one for their exact engine version:**
 
-- ✅ **`UnrealMCPython_<engine>_<version>.zip`** (e.g. `UnrealMCPython_5.8_2.2.0.zip`) — **precompiled** for that exact UE version. No C++ toolchain, no rebuild — just drop it in and launch. **Pick the one matching your engine version.**
+- ✅ **`UnrealMCPython_<engine>_<version>.zip`** (e.g. `UnrealMCPython_5.8_2.2.0.zip`) — **precompiled for Win64** against that exact UE version. No C++ toolchain, no rebuild — just drop it in and launch. **Pick the one matching your engine version.**
 - 🛠️ **`UnrealMCPython_Source_<version>.zip`** — **source only**, for C++ developers (the CI release pipeline runs on Linux and does not compile the C++ module). Unreal tries to *compile* it on first open, which **requires Visual Studio with the "Game development with C++" workload**. Without that toolchain the build fails and the editor closes — so don't use this one unless you intend to compile.
 
 Extract, then copy `Plugins/UnrealMCPython/` into your project's `Plugins/` folder:
@@ -137,7 +137,16 @@ YourProject/
 Keep the `mcp-server/` folder from the zip in a convenient location — you'll need its path in Step 3.
 
 > [!NOTE]
-> Precompiled binaries are engine-version-specific. If there's no `_<your engine>_` zip for your version, either ask for one in an issue or use the source zip and let Unreal compile it on first open (Windows: Visual Studio with the "Game development with C++" workload). Maintainers build the per-version binaries locally with `tools/build-plugin.ps1` (the CI pipeline can't — GitHub-hosted runners have no Unreal Engine).
+> Precompiled binaries are engine-version-specific. If there's no `_<your engine>_` zip for your version, either ask for one in an issue or use the source zip and let Unreal compile it on first open (Windows: Visual Studio with the "Game development with C++" workload). Maintainers build the per-version binaries locally with `tools/build-plugin.ps1` (Win64) or `tools/build-plugin.sh` (Linux) — the CI pipeline can't, GitHub-hosted runners have no Unreal Engine.
+
+> [!NOTE]
+> **Linux.** The plugin builds and loads on the Linux editor, but the released binaries are
+> Win64 only — take the source zip (or this repo) and let Unreal compile the module on first
+> open; the Clang toolchain shipped with the engine is enough. Live Coding does not exist on
+> Linux, so `util livecoding_compile` is unavailable there: pick up C++ changes with a full
+> rebuild while the editor is **closed**
+> (`Engine/Build/BatchFiles/Linux/Build.sh <Target>Editor Linux Development -project=<uproject>`).
+> Packaging a precompiled Linux plugin locally: `tools/build-plugin.sh`.
 
 > [!WARNING]
 > **Seeing `'UnrealMCPython' was designed for build 5.7.0 … load anyway?` or a rebuild that fails and closes the editor?** You downloaded the **source** zip (or a binary for a different engine version). Download the **`UnrealMCPython_<your engine>_<version>.zip`** that matches your engine instead — it loads without compiling. (Source builds from releases ≤ 2.2.0 also pin an old engine version; this is fixed on `main`.)
@@ -191,7 +200,7 @@ Add the server to your MCP client config:
 
 1. Restart your MCP client
 2. The MCP server starts automatically
-3. Verify — you should see the 19 Unreal-MCPython domain tools listed in your client
+3. Verify — you should see the 21 Unreal-MCPython domain tools listed in your client
 
 ## Usage
 
@@ -369,6 +378,7 @@ Pass any action below to its domain tool. Use `{ "action": "list_actions" }` on 
 | Plugin not visible | Restart UE and confirm both plugins are enabled |
 | Tools not showing | Restart your MCP client and verify the config |
 | An action errors on params | Call `{ "action": "list_actions" }` on that domain to see exact parameter names |
+| `livecoding_compile` reports Live Coding unavailable | Expected on Linux — Live Coding is Windows-only. Close the editor, rebuild the editor target, reopen |
 
 ## Contributing
 

@@ -54,13 +54,17 @@ public class UnrealMCPython : ModuleRules
 				"GameplayTasks",
 				"AIGraph",
 				"BehaviorTreeEditor",
-				"LiveCoding",
 				"UMG",
 				"UMGEditor",
 				"AnimGraph",
 				"AnimGraphRuntime",
 			}
 			);
+
+		if (Target.bWithLiveCoding)
+		{
+			PrivateDependencyModuleNames.Add("LiveCoding");
+		}
 		
 		
 		DynamicallyLoadedModuleNames.AddRange(

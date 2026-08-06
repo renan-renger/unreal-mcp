@@ -7,6 +7,7 @@
   named UnrealMCPython_<engineLabel>_<pluginVersion>.zip. Run once per UE version on a machine
   that has that engine installed — the same model KawaiiPhysics uses for its per-version releases.
   GitHub-hosted CI cannot do this (no Unreal Engine on the runner), so this is a local build step.
+  Linux counterpart: tools/build-plugin.sh (produces UnrealMCPython_Linux_<engineLabel>_<ver>.zip).
 
 .EXAMPLE
   ./tools/build-plugin.ps1 -UeRoot "C:\Program Files\Epic Games\UE_5.7"

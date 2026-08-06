@@ -639,7 +639,7 @@ def ue_join_actors(actor_labels: list = None, new_actor_label: str = "") -> str:
 
 def ue_create_proxy_actor(actor_labels: list = None, base_package_name: str = None,
                           screen_size: int = 300, destroy_source_actors: bool = False) -> str:
-    """Bakes static mesh actors into ONE simplified proxy mesh (Proxy Geometry tool) and spawns it."""
+    """Bakes static mesh actors into ONE simplified proxy mesh (Proxy Geometry tool, Win64 only) and spawns it."""
     if not actor_labels or base_package_name is None:
         return json.dumps({"success": False, "message": "Required: actor_labels (non-empty), base_package_name."})
     try:
