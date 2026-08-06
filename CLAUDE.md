@@ -78,6 +78,45 @@ run therefore guarantees the editor survived the whole sweep — never chain
 `pytest && git commit && gh pr create` assuming connection-error results count as
 passes. Release chains stop at the first red gate.
 
+### Running the gates without taking the machine down
+
+**Silence `LogRendererCore` when launching an editor for the suite.** Validate-on-save
+re-enters Slate from a `SlowTask` progress refresh and can spin `FlushRenderingCommands`
+recursively, logging `FlushRenderingCommands called recursively! 2 calls on the stack.`
+in a tight loop. Measured once at **1,073,165 lines / 131 MB in a single session**, enough
+to hard-freeze the machine. The suite saves constantly (278 packages in one run), so it
+hits this readily:
+
+```bash
+UnrealEditor UnrealMCPSample.uproject -LogCmds="LogRendererCore off"
+```
+
+Disabling the trigger instead (`bValidateOnSave=False` under
+`[/Script/DataValidation.DataValidationSettings]` in `Config/DefaultEditor.ini`) also works
+and was verified, but it changes save behaviour for everyone who opens the project, so it
+is deliberately **not** committed. Note the property on `UEditorValidatorSubsystem` of the
+same name is `DeprecatedProperty` and setting it does nothing — only the
+`UDataValidationSettings` one is read.
+
+**Let the editor settle between gate 3 and gate 4.** Running E2E straight after the ~90s
+in-editor suite invites DDC maintenance to land on top of it — one run stalled the game
+thread ~190s (`LogDerivedDataCache: Maintenance finished in +00:01:04`, then a silent gap;
+`LogAutomationController` logged `Ignoring very large delta of 251.27 seconds`). The E2E
+client times out at 30s, so everything in that window fails with `No response from Unreal`
+and reads as a block of unrelated failures. A failure block that is *consecutive* in one
+domain plus one heavy test is a stall signature, not N independent bugs — check whether
+the editor is still alive before diagnosing further.
+
+**A socket timeout is not a red gate 3.** `core.send_python_exec` hardcodes `TIMEOUT = 30`,
+shorter than the ~90s suite, so driving `run_all.py` through it *always* reports a timeout
+even on a green run. Use a client with a longer timeout, or read the verdict from the log
+(`Ran N tests` / `OK (skipped=…)`).
+
+**Grep the right log.** If an editor is already running, UE writes to `UnrealMCPSample_2.log`
+instead of `UnrealMCPSample.log`. Greps against the stale file return zeros that look like
+clean results. Check `ls -t Saved/Logs/*.log` first, and pair any "absence" check with a
+positive control (e.g. assert saves happened before concluding validation did not run).
+
 ## Adding an action to an existing domain
 
 1. Prototype fast with `util execute_python` (arbitrary Unreal Python, seconds-scale).
