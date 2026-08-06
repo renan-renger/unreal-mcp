@@ -16,7 +16,8 @@ class MCPTestCase(unittest.TestCase):
     def assertSuccess(self, result, msg=None):
         self.assertTrue(result.get("success"), msg or f"Expected success=True: {result}")
 
-    def delete_asset(self, path):
+    @staticmethod
+    def delete_asset(path):
         try:
             if unreal.EditorAssetLibrary.does_asset_exist(path):
                 unreal.EditorAssetLibrary.delete_asset(path)

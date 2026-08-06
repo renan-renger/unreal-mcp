@@ -351,4 +351,19 @@ public:
     /** Deproject a viewport pixel to a world location at the given distance along the view ray. Returns JSON. */
     UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
     static FString ScreenToWorld(float ScreenX, float ScreenY, float Distance);
+
+    // ─── Reflection access to script-hidden properties ────────────────────────────
+    // A UPROPERTY() carrying neither EditAnywhere nor BlueprintReadOnly is invisible
+    // to Python: get_editor_property reports "is protected and cannot be read". The
+    // FProperty layer has no such notion, so these read and write through reflection
+    // directly. Deliberately type-generic — no dependency on the owning module, which
+    // is what makes them usable against optional plugins (e.g. UStateTree::EditorData).
+
+    /** Read a UObject-typed UPROPERTY by name, ignoring script visibility. Null if absent or wrong type. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static UObject* GetObjectPropertyRaw(UObject* Owner, FName PropertyName);
+
+    /** Write a UClass-typed UPROPERTY by name, ignoring script visibility. False if absent or type-incompatible. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static bool SetClassPropertyRaw(UObject* Owner, FName PropertyName, UClass* Value);
 };
