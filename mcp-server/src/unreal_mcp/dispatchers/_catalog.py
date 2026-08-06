@@ -519,7 +519,7 @@ CATALOG = {
         },
         'create_proxy_actor': {
             'params': 'actor_labels, base_package_name, screen_size=300, destroy_source_actors=False',
-            'doc': 'Bakes static mesh actors into ONE simplified proxy mesh (Proxy Geometry tool) and spawns it.',
+            'doc': 'Bakes static mesh actors into ONE simplified proxy mesh (Proxy Geometry tool, Win64 only) and spawns it.',
         },
         'get_open_assets': {
             'params': '',

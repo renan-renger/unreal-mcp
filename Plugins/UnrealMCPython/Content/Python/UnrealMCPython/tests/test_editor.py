@@ -1,3 +1,4 @@
+import platform
 import unreal
 from UnrealMCPython.tests.base import MCPTestCase, TEST_ROOT
 
@@ -137,6 +138,8 @@ class TestEditorActions(MCPTestCase):
 
     def test_create_proxy_actor(self):
         import unreal
+        if platform.system() != "Windows":
+            self.skipTest("ProxyLOD mesh reduction is Win64-only (ProxyLODMeshReduction PlatformAllowList)")
         labels = self._spawn_cubes()
         proxy = None
         mesh_asset = None
