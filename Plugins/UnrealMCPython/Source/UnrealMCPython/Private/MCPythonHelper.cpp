@@ -1661,3 +1661,32 @@ FString UMCPythonHelper::ScreenToWorld(float ScreenX, float ScreenY, float Dista
     R->SetNumberField(TEXT("distance"), Distance);
     return SerializeJsonObj(R);
 }
+
+UObject* UMCPythonHelper::GetObjectPropertyRaw(UObject* Owner, FName PropertyName)
+{
+    if (!Owner)
+        return nullptr;
+
+    FProperty* Prop = Owner->GetClass()->FindPropertyByName(PropertyName);
+    if (FObjectPropertyBase* ObjProp = CastField<FObjectPropertyBase>(Prop))
+        return ObjProp->GetObjectPropertyValue_InContainer(Owner);
+
+    return nullptr;
+}
+
+bool UMCPythonHelper::SetClassPropertyRaw(UObject* Owner, FName PropertyName, UClass* Value)
+{
+    if (!Owner)
+        return false;
+
+    FProperty* Prop = Owner->GetClass()->FindPropertyByName(PropertyName);
+    FClassProperty* ClassProp = CastField<FClassProperty>(Prop);
+    if (!ClassProp)
+        return false;
+
+    if (Value && ClassProp->MetaClass && !Value->IsChildOf(ClassProp->MetaClass))
+        return false;
+
+    ClassProp->SetObjectPropertyValue_InContainer(Owner, Value);
+    return true;
+}
