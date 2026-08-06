@@ -21,7 +21,27 @@ import sys
 from pathlib import Path
 
 MCP_SERVER_DIR = Path(__file__).parent
-PLUGIN_DIR = MCP_SERVER_DIR.parent / "Plugins" / "UnrealMCPython" / "Content" / "Python" / "UnrealMCPython"
+_PLUGIN_REL = Path("Plugins") / "UnrealMCPython" / "Content" / "Python" / "UnrealMCPython"
+
+
+def _find_plugin_dir() -> Path:
+    """Locate the plugin action modules by walking up, not by a fixed parent depth.
+
+    Here mcp-server/ sits at the repository root, so the plugin is one level up. A
+    project that vendors the server nests it deeper (MadorasRebirth keeps it under
+    Tools/unreal-mcpython/), and the fixed path then points at a directory that does
+    not exist — the generator finds no action modules, emits an empty catalog, and
+    validate_tools reports the shipped catalog as stale. Falling back to the original
+    location keeps the error message meaningful when the plugin genuinely is absent.
+    """
+    for base in [MCP_SERVER_DIR.resolve(), *MCP_SERVER_DIR.resolve().parents]:
+        candidate = base / _PLUGIN_REL
+        if candidate.is_dir():
+            return candidate
+    return MCP_SERVER_DIR.parent / _PLUGIN_REL
+
+
+PLUGIN_DIR = _find_plugin_dir()
 OUTPUT = MCP_SERVER_DIR / "src" / "unreal_mcp" / "dispatchers" / "_catalog.py"
 
 # Domain → plugin action file (module is UnrealMCPython.<file stem>)
