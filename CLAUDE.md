@@ -88,8 +88,23 @@ to hard-freeze the machine. The suite saves constantly (278 packages in one run)
 hits this readily:
 
 ```bash
-UnrealEditor UnrealMCPSample.uproject -LogCmds="LogRendererCore off"
+UnrealEditor UnrealMCPSample.uproject -LogCmds="LogRendererCore off" \
+  '-ini:EditorPerProjectUserSettings:[/Script/UnrealEd.EditorLoadingSavingSettings]:bAutoSaveEnable=False'
 ```
+
+**Disable autosave for the same launch.** E2E spawns actors into the open (untitled) level
+and never cleans them up, so autosave eventually fires on a map full of test actors while
+the suite is still running. The game thread parks in `SavePackage`, every request in that
+window hits the 30s client timeout, and a whole domain fails at once — one run went
+`26 failed, 530 passed in 841.22s`, all 26 in `actor`, purely from timeouts
+(26 × 30s ≈ the entire runtime). With autosave off the same suite is `556 passed in 4.42s`.
+The signature in the log is `Cmd: OBJ SAVEPACKAGE PACKAGE="/Temp/Untitled_1" ... AUTOSAVING=true`.
+The setting is **not reachable from Python** — `unreal.EditorLoadingSavingSettings` is not
+exposed, `set_editor_property("auto_save_enable")` on the CDO fails (no script visibility),
+and `MCPythonHelper.SetClassPropertyRaw` only writes `UClass`-typed properties. The
+command-line `-ini:` override above is the way; it touches no file on disk. Verify it took
+by the absence of `AUTOSAVING=true` in the log **paired with** a positive control that saves
+did happen (`grep -c SavePackage`).
 
 Disabling the trigger instead (`bValidateOnSave=False` under
 `[/Script/DataValidation.DataValidationSettings]` in `Config/DefaultEditor.ini`) also works
@@ -106,6 +121,22 @@ client times out at 30s, so everything in that window fails with `No response fr
 and reads as a block of unrelated failures. A failure block that is *consecutive* in one
 domain plus one heavy test is a stall signature, not N independent bugs — check whether
 the editor is still alive before diagnosing further.
+
+**After a `kill -9`, the relaunched editor logs a TCP server it does not have.**
+`LogMCPython: TCP server started at 127.0.0.1:12029.` is printed even when the bind failed,
+so the log reads clean while every client gets `ConnectionRefusedError` and `ss -ltn` shows
+no listener at all. Killing the editor hard leaves the socket held long enough to poison the
+next launch. Close the editor normally when it still responds; after a forced kill, wait for
+the port to clear before relaunching. Also note an empty `/dev/tcp` probe is not a readiness
+check — poll with a real `{"type": "python"}` request instead.
+
+**A leftover test asset fails the whole test class, silently.** `MCPTestCase.delete_asset`
+wraps the delete in `except Exception: pass`, so when a previous run died mid-suite and left
+e.g. `MCP_TestAnimBP` behind, `setUp` fails to remove it without saying so and every test in
+the class then dies on `Asset already exists: /Game/Tests/MCP/MCP_TestAnimBP`. `Content/Tests/`
+is gitignored — delete the stale `.uasset` files on disk with the editor **closed** and rerun.
+Deleting one through `EditorAssetLibrary.delete_asset` while the editor is up opens a modal
+that blocks the game thread with no log line, which then needs the forced kill above.
 
 **A socket timeout is not a red gate 3.** `core.send_python_exec` hardcodes `TIMEOUT = 30`,
 shorter than the ~90s suite, so driving `run_all.py` through it *always* reports a timeout
@@ -222,7 +253,43 @@ action, never the rest. The convention:
   shows up in `list_actions`.
 - In-editor tests `skipTest` when the plugin isn't available.
 - **Never** add a Build.cs / .uplugin dependency on an optional plugin for C++ helpers —
-  that would make the whole plugin fail to load without it. Prefer the Python path; if C++
-  is unavoidable, use an `"Optional": true` plugin reference with conditional compilation.
+  that would make the whole plugin fail to load without it. Prefer the Python path; when
+  C++ is unavoidable, put it in a companion plugin (below).
 - Don't auto-enable plugins (editing .uproject is invasive and needs a restart) — the
   guard message tells the user what to enable.
+
+### Companion plugins (when C++ needs a hard dependency)
+
+Some editor APIs are simply not script-exposed, and no amount of reflection reaches them.
+The StateTree editor API is the worked example: `UStateTreeEditingSubsystem` is
+`UCLASS(MinimalAPI)` whose compile/validate methods are plain C++ statics with no
+`UFUNCTION`, `UStateTreeState::Children` is `BlueprintReadOnly` with no `Edit` flag so
+Python cannot append to it, and `UStateTreeEditorData::EditorBindings` is a bare
+`UPROPERTY()`. Reading was possible through `MCPythonHelper.GetObjectPropertyRaw`;
+writing was not.
+
+The answer is a **separate plugin**, not a module inside UnrealMCPython and not an
+`"Optional": true` reference. `Plugins/UnrealMCPythonStateTree/` is the template:
+
+- `EnabledByDefault: false`, and a **hard** dependency on both `UnrealMCPython` and the
+  optional plugin. Hard is safe precisely because the whole plugin is opt-in — a project
+  that does not enable it never links the dependency.
+- The dependency is contained. A hard dep inside the core plugin would force the optional
+  plugin on every consumer project and take the entire MCP server down whenever it is
+  disabled; that is the failure this structure exists to avoid.
+- Module type `Editor` links an `UncookedOnly` editor module fine — `Editor` is the
+  narrower of the two.
+- The `ue_*` functions still live in the **core** plugin's `<domain>_actions.py`, so the
+  catalog generator needs no change. They guard on the helper class instead of the plugin:
+  ```python
+  if not hasattr(unreal, "MCPythonStateTreeHelper"):
+      return json.dumps({"success": False, "message":
+          "Requires the UnrealMCPythonStateTree plugin. Enable it in Edit > Plugins, "
+          "then rebuild the editor with it closed."})
+  ```
+- The core plugin's `Private/MCPythonHelperInternal.h` is not reachable from another
+  module. Duplicate the few JSON helpers rather than promoting them to Public.
+- Mutating actions mark the package dirty and stop there; `save` is an explicit opt-in
+  param, so a failed authoring step never leaves a half-written asset on disk.
+- `release.yml` stages `Plugins/UnrealMCPython` only, so a companion plugin ships in no
+  release zip until that workflow is extended.
