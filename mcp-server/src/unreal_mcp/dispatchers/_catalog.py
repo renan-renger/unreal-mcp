@@ -853,6 +853,10 @@ CATALOG = {
             'params': "asset_path, state_path, node_kind='task', node_struct, save=False",
             'doc': 'Adds a task, condition, consideration or evaluator and returns its struct_id (requires the UnrealMCPythonStateTree plugin).',
         },
+        'add_state_tree_transition': {
+            'params': "asset_path, state_path, trigger='OnStateCompleted', transition_type='GotoState', target_state_path='', priority='Normal', delay_duration=0.0, save=False",
+            'doc': 'Adds a transition to a state and returns its index (requires the UnrealMCPythonStateTree plugin).',
+        },
         'compile_state_tree': {
             'params': 'asset_path, save=False',
             'doc': 'Compiles a StateTree and returns the compiler log (requires the UnrealMCPythonStateTree plugin).',
@@ -872,6 +876,10 @@ CATALOG = {
         'get_state_tree_structure': {
             'params': 'asset_path',
             'doc': "Dumps a StateTree's full state hierarchy, tasks and transitions (requires the StateTree plugin).",
+        },
+        'get_state_tree_transitions': {
+            'params': 'asset_path, state_path',
+            'doc': "Lists a state's transitions with their trigger, target and priority (requires the UnrealMCPythonStateTree plugin).",
         },
         'lint_state_tree': {
             'params': 'asset_path',
@@ -896,6 +904,14 @@ CATALOG = {
         'remove_state_tree_node': {
             'params': "asset_path, state_path, node_kind='task', struct_id, save=False",
             'doc': 'Removes a task/condition/consideration/evaluator by struct_id (requires the UnrealMCPythonStateTree plugin).',
+        },
+        'remove_state_tree_transition': {
+            'params': 'asset_path, state_path, index=-1, save=False',
+            'doc': 'Removes the transition at index from a state (requires the UnrealMCPythonStateTree plugin).',
+        },
+        'set_state_selection_behavior': {
+            'params': 'asset_path, state_path, behavior, save=False',
+            'doc': 'Sets how a state selects among its children, e.g. TrySelectChildrenWithHighestUtility (requires the UnrealMCPythonStateTree plugin).',
         },
         'validate_state_tree': {
             'params': 'asset_path, save=False',

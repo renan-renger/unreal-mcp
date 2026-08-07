@@ -957,3 +957,249 @@ FString UMCPythonStateTreeHelper::RemoveStateTreeBinding(UStateTree* StateTree,
 	Obj->SetNumberField(TEXT("removed_count"), CountBefore - CountAfter);
 	return SerializeJsonObj(Obj);
 }
+
+// ── transitions ───────────────────────────────────────────────────────────────
+
+namespace
+{
+
+/** Resolves an enum entry by name, accepting both the bare and the fully qualified form. */
+template <typename TEnum>
+bool ResolveEnum(const FString& Name, TEnum& OutValue, FString& OutError)
+{
+	const UEnum* Enum = StaticEnum<TEnum>();
+	int64 Value = Enum->GetValueByNameString(Name);
+	if (Value == INDEX_NONE)
+	{
+		// GetValueByNameString misses the short form on namespaced enums.
+		Value = Enum->GetValueByNameString(FString::Printf(TEXT("%s::%s"), *Enum->GetName(), *Name));
+	}
+	if (Value == INDEX_NONE)
+	{
+		TArray<FString> Accepted;
+		for (int32 i = 0; i < Enum->NumEnums() - 1; ++i)
+		{
+			if (!Enum->HasMetaData(TEXT("Hidden"), i))
+			{
+				Accepted.Add(Enum->GetNameStringByIndex(i));
+			}
+		}
+		OutError = FString::Printf(TEXT("Unknown %s: '%s'. Expected one of: %s."),
+			*Enum->GetName(), *Name, *FString::Join(Accepted, TEXT(", ")));
+		return false;
+	}
+	OutValue = static_cast<TEnum>(Value);
+	return true;
+}
+
+/** One transition as JSON. Index is the caller's handle for removal. */
+TSharedRef<FJsonObject> TransitionToJson(const FStateTreeTransition& Transition, const int32 Index)
+{
+	const TSharedRef<FJsonObject> Obj = MakeShared<FJsonObject>();
+	Obj->SetNumberField(TEXT("index"), Index);
+	Obj->SetStringField(TEXT("id"), Transition.ID.ToString());
+	Obj->SetStringField(TEXT("trigger"),
+		StaticEnum<EStateTreeTransitionTrigger>()->GetNameStringByValue(static_cast<int64>(Transition.Trigger)));
+	Obj->SetStringField(TEXT("transition_type"),
+		StaticEnum<EStateTreeTransitionType>()->GetNameStringByValue(static_cast<int64>(Transition.State.LinkType)));
+	Obj->SetStringField(TEXT("target_state"), Transition.State.Name.ToString());
+	Obj->SetStringField(TEXT("priority"),
+		StaticEnum<EStateTreeTransitionPriority>()->GetNameStringByValue(static_cast<int64>(Transition.Priority)));
+	Obj->SetBoolField(TEXT("delay_transition"), Transition.bDelayTransition);
+	Obj->SetNumberField(TEXT("delay_duration"), Transition.DelayDuration);
+	Obj->SetNumberField(TEXT("condition_count"), Transition.Conditions.Num());
+	Obj->SetBoolField(TEXT("enabled"), Transition.bTransitionEnabled);
+	return Obj;
+}
+
+} // namespace
+
+FString UMCPythonStateTreeHelper::GetStateTreeTransitions(UStateTree* StateTree, const FString& StatePath)
+{
+	FString Error;
+	UStateTreeEditorData* EditorData = GetEditorData(StateTree, Error);
+	if (!EditorData)
+	{
+		return MakeJsonError(Error);
+	}
+
+	UStateTreeState* State = FindStateByPath(EditorData, StatePath);
+	if (!State)
+	{
+		return MakeStateNotFoundError(EditorData, StatePath);
+	}
+
+	TArray<TSharedPtr<FJsonValue>> Items;
+	for (int32 i = 0; i < State->Transitions.Num(); ++i)
+	{
+		Items.Add(MakeShared<FJsonValueObject>(TransitionToJson(State->Transitions[i], i)));
+	}
+
+	const TSharedRef<FJsonObject> Obj = MakeShared<FJsonObject>();
+	Obj->SetBoolField(TEXT("success"), true);
+	Obj->SetStringField(TEXT("asset_path"), StateTree->GetPathName());
+	Obj->SetStringField(TEXT("state_path"), MakeStatePath(State));
+	Obj->SetArrayField(TEXT("transitions"), Items);
+	Obj->SetNumberField(TEXT("count"), Items.Num());
+	return SerializeJsonObj(Obj);
+}
+
+FString UMCPythonStateTreeHelper::AddStateTreeTransition(UStateTree* StateTree, const FString& StatePath,
+                                                         const FString& Trigger, const FString& TransitionType,
+                                                         const FString& TargetStatePath, const FString& Priority,
+                                                         float DelayDuration)
+{
+	FString Error;
+	UStateTreeEditorData* EditorData = GetEditorData(StateTree, Error);
+	if (!EditorData)
+	{
+		return MakeJsonError(Error);
+	}
+
+	UStateTreeState* State = FindStateByPath(EditorData, StatePath);
+	if (!State)
+	{
+		return MakeStateNotFoundError(EditorData, StatePath);
+	}
+
+	EStateTreeTransitionTrigger ResolvedTrigger = EStateTreeTransitionTrigger::OnStateCompleted;
+	if (!Trigger.IsEmpty() && !ResolveEnum(Trigger, ResolvedTrigger, Error))
+	{
+		return MakeJsonError(Error);
+	}
+
+	EStateTreeTransitionType ResolvedType = EStateTreeTransitionType::GotoState;
+	if (!TransitionType.IsEmpty() && !ResolveEnum(TransitionType, ResolvedType, Error))
+	{
+		return MakeJsonError(Error);
+	}
+
+	EStateTreeTransitionPriority ResolvedPriority = EStateTreeTransitionPriority::Normal;
+	if (!Priority.IsEmpty() && !ResolveEnum(Priority, ResolvedPriority, Error))
+	{
+		return MakeJsonError(Error);
+	}
+
+	// Only GotoState carries a target; the others resolve relative to the tree,
+	// so a target path there would silently do nothing.
+	UStateTreeState* TargetState = nullptr;
+	if (ResolvedType == EStateTreeTransitionType::GotoState)
+	{
+		if (TargetStatePath.IsEmpty())
+		{
+			return MakeJsonError(TEXT("TargetStatePath is required when TransitionType is GotoState."));
+		}
+		TargetState = FindStateByPath(EditorData, TargetStatePath);
+		if (!TargetState)
+		{
+			return MakeStateNotFoundError(EditorData, TargetStatePath);
+		}
+	}
+	else if (!TargetStatePath.IsEmpty())
+	{
+		return MakeJsonError(FString::Printf(
+			TEXT("TargetStatePath is only meaningful for GotoState, not '%s'."),
+			*StaticEnum<EStateTreeTransitionType>()->GetNameStringByValue(static_cast<int64>(ResolvedType))));
+	}
+
+	MarkDirty(StateTree, EditorData);
+	State->Modify();
+
+	FStateTreeTransition& NewTransition = State->Transitions.AddDefaulted_GetRef();
+	NewTransition.Trigger = ResolvedTrigger;
+	NewTransition.State = FStateTreeStateLink(ResolvedType);
+	if (TargetState)
+	{
+		NewTransition.State.Name = TargetState->Name;
+		NewTransition.State.ID = TargetState->ID;
+	}
+	NewTransition.Priority = ResolvedPriority;
+	NewTransition.ID = FGuid::NewGuid();
+	if (DelayDuration > 0.0f)
+	{
+		NewTransition.bDelayTransition = true;
+		NewTransition.DelayDuration = DelayDuration;
+	}
+
+	const int32 Index = State->Transitions.Num() - 1;
+	const TSharedRef<FJsonObject> Obj = TransitionToJson(NewTransition, Index);
+	Obj->SetBoolField(TEXT("success"), true);
+	Obj->SetStringField(TEXT("asset_path"), StateTree->GetPathName());
+	Obj->SetStringField(TEXT("state_path"), MakeStatePath(State));
+	return SerializeJsonObj(Obj);
+}
+
+FString UMCPythonStateTreeHelper::RemoveStateTreeTransition(UStateTree* StateTree, const FString& StatePath,
+                                                            int32 Index)
+{
+	FString Error;
+	UStateTreeEditorData* EditorData = GetEditorData(StateTree, Error);
+	if (!EditorData)
+	{
+		return MakeJsonError(Error);
+	}
+
+	UStateTreeState* State = FindStateByPath(EditorData, StatePath);
+	if (!State)
+	{
+		return MakeStateNotFoundError(EditorData, StatePath);
+	}
+
+	if (!State->Transitions.IsValidIndex(Index))
+	{
+		return MakeJsonError(FString::Printf(
+			TEXT("Transition index %d is out of range; state '%s' has %d transition(s)."),
+			Index, *StatePath, State->Transitions.Num()));
+	}
+
+	MarkDirty(StateTree, EditorData);
+	State->Modify();
+	State->Transitions.RemoveAt(Index);
+
+	const TSharedRef<FJsonObject> Obj = MakeShared<FJsonObject>();
+	Obj->SetBoolField(TEXT("success"), true);
+	Obj->SetStringField(TEXT("asset_path"), StateTree->GetPathName());
+	Obj->SetStringField(TEXT("state_path"), MakeStatePath(State));
+	Obj->SetNumberField(TEXT("removed_index"), Index);
+	Obj->SetNumberField(TEXT("count"), State->Transitions.Num());
+	return SerializeJsonObj(Obj);
+}
+
+FString UMCPythonStateTreeHelper::SetStateSelectionBehavior(UStateTree* StateTree, const FString& StatePath,
+                                                            const FString& Behavior)
+{
+	FString Error;
+	UStateTreeEditorData* EditorData = GetEditorData(StateTree, Error);
+	if (!EditorData)
+	{
+		return MakeJsonError(Error);
+	}
+
+	UStateTreeState* State = FindStateByPath(EditorData, StatePath);
+	if (!State)
+	{
+		return MakeStateNotFoundError(EditorData, StatePath);
+	}
+
+	EStateTreeStateSelectionBehavior Resolved = EStateTreeStateSelectionBehavior::TrySelectChildrenInOrder;
+	if (!ResolveEnum(Behavior, Resolved, Error))
+	{
+		return MakeJsonError(Error);
+	}
+
+	const FString Previous =
+		StaticEnum<EStateTreeStateSelectionBehavior>()->GetNameStringByValue(static_cast<int64>(State->SelectionBehavior));
+
+	MarkDirty(StateTree, EditorData);
+	State->Modify();
+	State->SelectionBehavior = Resolved;
+
+	const TSharedRef<FJsonObject> Obj = MakeShared<FJsonObject>();
+	Obj->SetBoolField(TEXT("success"), true);
+	Obj->SetStringField(TEXT("asset_path"), StateTree->GetPathName());
+	Obj->SetStringField(TEXT("state_path"), MakeStatePath(State));
+	Obj->SetStringField(TEXT("previous_behavior"), Previous);
+	Obj->SetStringField(TEXT("selection_behavior"),
+		StaticEnum<EStateTreeStateSelectionBehavior>()->GetNameStringByValue(static_cast<int64>(Resolved)));
+	return SerializeJsonObj(Obj);
+}
