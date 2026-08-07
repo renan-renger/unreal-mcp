@@ -913,3 +913,46 @@ class TestStateTreeActions(MCPTestCase):
     def test_list_state_tree_parameters_missing_param(self):
         r = self.call("state_tree_actions", "ue_list_state_tree_parameters")
         self.assertFalse(r.get("success"))
+
+    # ── node property inspection ──────────────────────────────────────────────
+
+    def test_list_state_tree_node_properties(self):
+        """A node's properties are readable, with the PropertyRef flag set honestly."""
+        self._skip_if_no_helper()
+        host = self._add_host_state("MCP_NodeProps")
+        try:
+            added = self.call("state_tree_actions", "ue_add_state_tree_node",
+                              asset_path=self._st_path, state_path=host,
+                              node_kind="task", node_struct=self._DELAY_TASK)
+            self.assertSuccess(added)
+            r = self.call("state_tree_actions", "ue_list_state_tree_node_properties",
+                          asset_path=self._st_path, struct_id=added["struct_id"])
+            self.assertSuccess(r)
+            self.assertEqual(r["count"], len(r["properties"]))
+            names = [p["name"] for p in r["properties"]]
+            # The delay task's own Duration must be there, or nothing was inspected.
+            self.assertIn("Duration", names)
+            # Every entry answers the PropertyRef question one way or the other.
+            for p in r["properties"]:
+                self.assertIn("is_property_ref", p)
+                if p["is_property_ref"]:
+                    self.assertIn("accepted_parameter_types", p)
+        finally:
+            self._drop_state(host)
+
+    def test_list_state_tree_node_properties_unknown_id(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_list_state_tree_node_properties",
+                      asset_path=self._st_path,
+                      struct_id="019FDD24-0000-0000-0000-000000000000")
+        self.assertFalse(r.get("success"))
+
+    def test_list_state_tree_node_properties_bad_id(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_list_state_tree_node_properties",
+                      asset_path=self._st_path, struct_id="not-a-guid")
+        self.assertFalse(r.get("success"))
+
+    def test_list_state_tree_node_properties_missing_param(self):
+        r = self.call("state_tree_actions", "ue_list_state_tree_node_properties")
+        self.assertFalse(r.get("success"))

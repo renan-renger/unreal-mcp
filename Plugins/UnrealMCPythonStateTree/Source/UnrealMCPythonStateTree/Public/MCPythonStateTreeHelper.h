@@ -203,4 +203,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
 	static FString RemoveStateTreeParameter(UStateTree* StateTree, const FString& StatePath,
 	                                        const FString& Name);
+
+	/**
+	 * Lists a node's bindable properties, and for each property reference the
+	 * parameter types it will accept.
+	 *
+	 * A PropertyRef refuses a binding whose type does not match, and the compile
+	 * error says only "types are incompatible" -- it never names the type it wanted.
+	 * The accepted_parameter_types here feed straight into AddStateTreeParameter.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+	static FString ListStateTreeNodeProperties(UStateTree* StateTree, const FString& StructId);
 };
