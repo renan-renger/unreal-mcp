@@ -857,6 +857,10 @@ CATALOG = {
             'params': "asset_path, state_path, node_kind='task', node_struct, save=False",
             'doc': 'Adds a task, condition, consideration or evaluator and returns its struct_id (requires the UnrealMCPythonStateTree plugin).',
         },
+        'add_state_tree_parameter': {
+            'params': "asset_path, name, param_type='Int32', state_path='', value_type_object='', save=False",
+            'doc': 'Adds a tree or state parameter, which is what a property reference binds to (requires the UnrealMCPythonStateTree plugin).',
+        },
         'add_state_tree_transition': {
             'params': "asset_path, state_path, trigger='OnStateCompleted', transition_type='GotoState', target_state_path='', priority='Normal', delay_duration=0.0, save=False",
             'doc': 'Adds a transition to a state and returns its index (requires the UnrealMCPythonStateTree plugin).',
@@ -897,6 +901,10 @@ CATALOG = {
             'params': "node_kind=''",
             'doc': 'Lists the task/condition/consideration/evaluator types a state tree can use (requires the UnrealMCPythonStateTree plugin).',
         },
+        'list_state_tree_parameters': {
+            'params': "asset_path, state_path=''",
+            'doc': "Lists the tree's root parameters, or a state's when state_path is given (requires the UnrealMCPythonStateTree plugin).",
+        },
         'list_state_trees': {
             'params': "path='/Game'",
             'doc': 'Lists every StateTree asset under a content path (requires the StateTree plugin).',
@@ -912,6 +920,10 @@ CATALOG = {
         'remove_state_tree_node': {
             'params': "asset_path, state_path, node_kind='task', struct_id, save=False",
             'doc': 'Removes a task/condition/consideration/evaluator by struct_id (requires the UnrealMCPythonStateTree plugin).',
+        },
+        'remove_state_tree_parameter': {
+            'params': "asset_path, name, state_path='', save=False",
+            'doc': 'Removes a tree or state parameter by name (requires the UnrealMCPythonStateTree plugin).',
         },
         'remove_state_tree_transition': {
             'params': 'asset_path, state_path, index=-1, save=False',

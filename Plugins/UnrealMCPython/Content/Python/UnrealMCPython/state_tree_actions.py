@@ -692,3 +692,66 @@ def ue_add_state_tree_blueprint_node(asset_path: str = None, state_path: str = N
     except Exception as e:
         return json.dumps({"success": False, "message": str(e),
                            "traceback": traceback.format_exc()})
+
+
+def ue_list_state_tree_parameters(asset_path: str = None, state_path: str = "") -> str:
+    """Lists the tree's root parameters, or a state's when state_path is given (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    if asset_path is None:
+        return json.dumps({"success": False, "message": "Required parameter: asset_path."})
+    try:
+        st, err = _load_state_tree(asset_path)
+        if err:
+            return json.dumps(err)
+        payload = unreal.MCPythonStateTreeHelper.list_state_tree_parameters(st, state_path or "")
+        return _finish(payload, asset_path, False)
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})
+
+
+def ue_add_state_tree_parameter(asset_path: str = None, name: str = None, param_type: str = "Int32",
+                                state_path: str = "", value_type_object: str = "",
+                                save: bool = False) -> str:
+    """Adds a tree or state parameter, which is what a property reference binds to (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    if asset_path is None or name is None:
+        return json.dumps({"success": False,
+                           "message": "Required parameters: asset_path, name."})
+    try:
+        st, err = _load_state_tree(asset_path)
+        if err:
+            return json.dumps(err)
+        # value_type_object is required for Enum/Struct/Object/Class types and
+        # rejected for the rest; the helper owns that rule.
+        payload = unreal.MCPythonStateTreeHelper.add_state_tree_parameter(
+            st, state_path or "", name, param_type, value_type_object or "")
+        return _finish(payload, asset_path, save)
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})
+
+
+def ue_remove_state_tree_parameter(asset_path: str = None, name: str = None,
+                                   state_path: str = "", save: bool = False) -> str:
+    """Removes a tree or state parameter by name (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    if asset_path is None or name is None:
+        return json.dumps({"success": False,
+                           "message": "Required parameters: asset_path, name."})
+    try:
+        st, err = _load_state_tree(asset_path)
+        if err:
+            return json.dumps(err)
+        payload = unreal.MCPythonStateTreeHelper.remove_state_tree_parameter(
+            st, state_path or "", name)
+        return _finish(payload, asset_path, save)
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})
