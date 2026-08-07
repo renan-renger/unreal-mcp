@@ -167,6 +167,10 @@ FString UMCPythonHelper::UmgAddWidget(UBlueprint* WidgetBP, const FString& Widge
     // Mark as variable so Blueprint graph can reference it directly
     NewWidget->bIsVariable = true;
 
+    // Every widget outered to the tree needs a variable GUID, or the widget
+    // compiler ensures ("was added but did not get a GUID") and patches one in.
+    WB->OnVariableAdded(NewWidget->GetFName());
+
     FString ActualParent;
     bool bIsRoot = false;
 
@@ -474,6 +478,7 @@ FString UMCPythonHelper::UmgWrapWidget(UBlueprint* WidgetBP, const FString& Widg
     UPanelWidget* Wrapper = WT->ConstructWidget<UPanelWidget>(WrapperClass, FName(*WrapperName));
     if (!Wrapper) return UmgErrorJson(FString::Printf(TEXT("Failed to construct wrapper '%s'."), *WrapperName));
     Wrapper->bIsVariable = true;
+    WB->OnVariableAdded(Wrapper->GetFName());
 
     if (UPanelWidget* OldParent = Cast<UPanelWidget>(Widget->GetParent()))
     {
@@ -516,6 +521,7 @@ FString UMCPythonHelper::UmgReplaceWidget(UBlueprint* WidgetBP, const FString& W
     UWidget* NewWidget = WT->ConstructWidget<UWidget>(NewClass, FName(*NewName));
     if (!NewWidget) return UmgErrorJson(FString::Printf(TEXT("Failed to construct widget '%s'."), *NewName));
     NewWidget->bIsVariable = true;
+    WB->OnVariableAdded(NewWidget->GetFName());
 
     if (UPanelWidget* OldParent = Cast<UPanelWidget>(Widget->GetParent()))
     {
