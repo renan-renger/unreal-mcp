@@ -139,3 +139,175 @@ class TestStateTreeActions(MCPTestCase):
     def test_lint_state_tree_missing_param(self):
         r = self.call("state_tree_actions", "ue_lint_state_tree")
         self.assertFalse(r.get("success"))
+
+    # ── authoring (UnrealMCPythonStateTree plugin) ─────────────────────────────
+
+    def _skip_if_no_helper(self):
+        self._skip_if_no_st()
+        if not hasattr(unreal, "MCPythonStateTreeHelper"):
+            self.skipTest("UnrealMCPythonStateTree plugin not enabled")
+
+    def _root_path(self):
+        structure = self.call("state_tree_actions", "ue_get_state_tree_structure",
+                              asset_path=self._st_path)
+        return structure["states"][0]["path"]
+
+    def _state_paths(self):
+        structure = self.call("state_tree_actions", "ue_get_state_tree_structure",
+                              asset_path=self._st_path)
+        return [s["path"] for s in structure["states"]]
+
+    # ── compile / validate ────────────────────────────────────────────────────
+
+    def test_compile_state_tree(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_compile_state_tree",
+                      asset_path=self._st_path)
+        self.assertSuccess(r)
+        self.assertIsInstance(r["messages"], list)
+        self.assertEqual(r["error_count"], 0)
+
+    def test_compile_state_tree_missing_param(self):
+        r = self.call("state_tree_actions", "ue_compile_state_tree")
+        self.assertFalse(r.get("success"))
+
+    def test_compile_state_tree_unknown_asset(self):
+        r = self.call("state_tree_actions", "ue_compile_state_tree",
+                      asset_path=f"{TEST_ROOT}/NoSuchST_XYZ")
+        self.assertFalse(r.get("success"))
+
+    def test_validate_state_tree(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_validate_state_tree",
+                      asset_path=self._st_path)
+        self.assertSuccess(r)
+        self.assertIn("needs_recompile", r)
+
+    def test_validate_state_tree_missing_param(self):
+        r = self.call("state_tree_actions", "ue_validate_state_tree")
+        self.assertFalse(r.get("success"))
+
+    # ── structure edits ───────────────────────────────────────────────────────
+
+    def test_add_and_remove_child_state(self):
+        """Add then remove, so the shared fixture is the same size after as before."""
+        self._skip_if_no_helper()
+        root = self._root_path()
+        before = len(self._state_paths())
+
+        added = self.call("state_tree_actions", "ue_add_child_state",
+                          asset_path=self._st_path, parent_state_path=root,
+                          name="MCP_Child")
+        self.assertSuccess(added)
+        self.assertEqual(added["state_path"], f"{root}/MCP_Child")
+        self.assertIn(added["state_path"], self._state_paths())
+
+        removed = self.call("state_tree_actions", "ue_remove_state",
+                            asset_path=self._st_path, state_path=added["state_path"])
+        self.assertSuccess(removed)
+        self.assertEqual(removed["removed_state_count"], 1)
+        self.assertEqual(len(self._state_paths()), before)
+
+    def test_add_and_remove_subtree(self):
+        """An empty parent path means a new subtree root rather than a child."""
+        self._skip_if_no_helper()
+        before = len(self._state_paths())
+
+        added = self.call("state_tree_actions", "ue_add_child_state",
+                          asset_path=self._st_path, name="MCP_Subtree",
+                          state_type="Group")
+        self.assertSuccess(added)
+        self.assertEqual(added["state_path"], "/MCP_Subtree")
+
+        removed = self.call("state_tree_actions", "ue_remove_state",
+                            asset_path=self._st_path, state_path="/MCP_Subtree")
+        self.assertSuccess(removed)
+        self.assertEqual(len(self._state_paths()), before)
+
+    def test_add_child_state_missing_param(self):
+        r = self.call("state_tree_actions", "ue_add_child_state",
+                      asset_path=_ST_PATH)
+        self.assertFalse(r.get("success"))
+
+    def test_add_child_state_unknown_parent(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_add_child_state",
+                      asset_path=self._st_path, parent_state_path="/Nope/Nowhere",
+                      name="MCP_Orphan")
+        self.assertFalse(r.get("success"))
+        self.assertIn("known_states", r)
+
+    def test_add_child_state_unknown_type(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_add_child_state",
+                      asset_path=self._st_path, parent_state_path=self._root_path(),
+                      name="MCP_BadType", state_type="NotAStateType")
+        self.assertFalse(r.get("success"))
+
+    def test_remove_state_missing_param(self):
+        r = self.call("state_tree_actions", "ue_remove_state", asset_path=_ST_PATH)
+        self.assertFalse(r.get("success"))
+
+    def test_remove_state_unknown_state(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_remove_state",
+                      asset_path=self._st_path, state_path="/Nope/Nowhere")
+        self.assertFalse(r.get("success"))
+        self.assertIn("known_states", r)
+
+    # ── bindings ──────────────────────────────────────────────────────────────
+
+    def test_get_state_tree_bindable_structs(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_get_state_tree_bindable_structs",
+                      asset_path=self._st_path)
+        self.assertSuccess(r)
+        self.assertIsInstance(r["structs"], list)
+        self.assertEqual(r["count"], len(r["structs"]))
+
+    def test_get_state_tree_bindable_structs_bad_id(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_get_state_tree_bindable_structs",
+                      asset_path=self._st_path, target_struct_id="not-a-guid")
+        self.assertFalse(r.get("success"))
+
+    def test_get_state_tree_bindable_structs_missing_param(self):
+        r = self.call("state_tree_actions", "ue_get_state_tree_bindable_structs")
+        self.assertFalse(r.get("success"))
+
+    def test_get_state_tree_bindings(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_get_state_tree_bindings",
+                      asset_path=self._st_path)
+        self.assertSuccess(r)
+        self.assertIsInstance(r["bindings"], list)
+        self.assertEqual(r["count"], len(r["bindings"]))
+
+    def test_get_state_tree_bindings_missing_param(self):
+        r = self.call("state_tree_actions", "ue_get_state_tree_bindings")
+        self.assertFalse(r.get("success"))
+
+    def test_add_state_tree_binding_missing_param(self):
+        r = self.call("state_tree_actions", "ue_add_state_tree_binding",
+                      asset_path=_ST_PATH)
+        self.assertFalse(r.get("success"))
+
+    def test_add_state_tree_binding_bad_id(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_add_state_tree_binding",
+                      asset_path=self._st_path,
+                      source_struct_id="not-a-guid", source_path="Foo",
+                      target_struct_id="not-a-guid", target_path="Bar")
+        self.assertFalse(r.get("success"))
+
+    def test_remove_state_tree_binding_missing_param(self):
+        r = self.call("state_tree_actions", "ue_remove_state_tree_binding",
+                      asset_path=_ST_PATH)
+        self.assertFalse(r.get("success"))
+
+    def test_remove_state_tree_binding_bad_id(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_remove_state_tree_binding",
+                      asset_path=self._st_path,
+                      target_struct_id="not-a-guid", target_path="Bar")
+        self.assertFalse(r.get("success"))
