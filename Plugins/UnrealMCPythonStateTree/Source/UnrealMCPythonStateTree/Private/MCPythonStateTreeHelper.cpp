@@ -10,6 +10,7 @@
 #include "StateTreeEditorData.h"
 #include "StateTreeEditorNode.h"
 #include "StateTreeEditorPropertyBindings.h"
+#include "StateTreePropertyRefHelpers.h"
 #include "StateTreeEvaluatorBase.h"
 #include "StateTreeState.h"
 #include "StateTreeTaskBase.h"
@@ -903,6 +904,97 @@ FString UMCPythonStateTreeHelper::GetStateTreeBindings(UStateTree* StateTree)
 	return SerializeJsonObj(Obj);
 }
 
+namespace
+{
+
+/** Finds an editor node anywhere in the tree by its struct ID. */
+const FStateTreeEditorNode* FindNodeById(UStateTreeEditorData* EditorData, const FGuid& Id)
+{
+	auto Search = [&Id](const TArray<FStateTreeEditorNode>& Nodes) -> const FStateTreeEditorNode*
+	{
+		for (const FStateTreeEditorNode& Node : Nodes)
+		{
+			if (Node.ID == Id)
+			{
+				return &Node;
+			}
+		}
+		return nullptr;
+	};
+
+	if (const FStateTreeEditorNode* Found = Search(EditorData->Evaluators))
+	{
+		return Found;
+	}
+	if (const FStateTreeEditorNode* Found = Search(EditorData->GlobalTasks))
+	{
+		return Found;
+	}
+
+	const FStateTreeEditorNode* Result = nullptr;
+	TFunction<void(UStateTreeState*)> Visit = [&](UStateTreeState* State)
+	{
+		if (!State || Result)
+		{
+			return;
+		}
+		if (const FStateTreeEditorNode* Found = Search(State->Tasks))
+		{
+			Result = Found;
+			return;
+		}
+		if (const FStateTreeEditorNode* Found = Search(State->EnterConditions))
+		{
+			Result = Found;
+			return;
+		}
+		if (const FStateTreeEditorNode* Found = Search(State->Considerations))
+		{
+			Result = Found;
+			return;
+		}
+		if (State->SingleTask.ID == Id)
+		{
+			Result = &State->SingleTask;
+			return;
+		}
+		for (UStateTreeState* Child : State->Children)
+		{
+			Visit(Child);
+		}
+	};
+	for (UStateTreeState* Root : EditorData->SubTrees)
+	{
+		Visit(Root);
+	}
+	return Result;
+}
+
+/**
+ * True when the binding target names a PropertyRef property.
+ *
+ * Only the first path segment is resolved: a PropertyRef is always a property of
+ * the node's instance data, never something nested further down.
+ */
+bool TargetIsPropertyRef(UStateTreeEditorData* EditorData, const FPropertyBindingPath& Target)
+{
+	const FStateTreeEditorNode* Node = FindNodeById(EditorData, Target.GetStructID());
+	if (!Node || Target.GetSegments().IsEmpty())
+	{
+		return false;
+	}
+	const UStruct* InstanceStruct = Node->GetInstance().GetStruct();
+	if (!InstanceStruct)
+	{
+		return false;
+	}
+	const FProperty* Property =
+		InstanceStruct->FindPropertyByName(Target.GetSegments()[0].GetName());
+	return Property && UE::StateTree::PropertyRefHelpers::IsPropertyRef(*Property);
+}
+
+} // namespace
+
 FString UMCPythonStateTreeHelper::AddStateTreeBinding(UStateTree* StateTree,
                                                       const FString& SourceStructId, const FString& SourcePath,
                                                       const FString& TargetStructId, const FString& TargetPath)
@@ -920,6 +1012,18 @@ FString UMCPythonStateTreeHelper::AddStateTreeBinding(UStateTree* StateTree,
 		|| !MakeBindingPath(TargetStructId, TargetPath, Target, Error))
 	{
 		return MakeJsonError(Error);
+	}
+
+	// A PropertyRef bound to a struct root resolves to zero indirections, and the
+	// compiler then indexes that empty array unguarded -- it takes the whole editor
+	// down on the next compile_state_tree, long after this call reported success.
+	// Refuse it here: the binding is never valid, and the failure is not survivable.
+	if (SourcePath.IsEmpty() && TargetIsPropertyRef(EditorData, Target))
+	{
+		return MakeJsonError(FString::Printf(
+			TEXT("'%s' is a property reference, so it needs a source property, not a struct root. ")
+			TEXT("Pass a source_path naming a property of the same type; binding a bare struct ")
+			TEXT("crashes the StateTree compiler."), *TargetPath));
 	}
 
 	MarkDirty(StateTree, EditorData);
@@ -1330,6 +1434,17 @@ FString UMCPythonStateTreeHelper::ListStateTreeBlueprintNodes(const FString& Nod
 		const FString ClassPathString = ClassPath.ToString();
 		// Native bases show up here too; only Blueprint generated classes end in _C.
 		if (!ClassPathString.EndsWith(TEXT("_C")))
+		{
+			continue;
+		}
+		// The compiler's own artefacts are registered like any other class. SKEL_ is the
+		// skeleton class regenerated on every Blueprint compile, REINST_ and TRASHCLASS_
+		// are reinstancing leftovers. None can be used as a node, and listing them doubles
+		// the result with entries that fail on add.
+		const FString ClassName = ClassPath.GetAssetName().ToString();
+		if (ClassName.StartsWith(TEXT("SKEL_"))
+			|| ClassName.StartsWith(TEXT("REINST_"))
+			|| ClassName.StartsWith(TEXT("TRASHCLASS_")))
 		{
 			continue;
 		}
