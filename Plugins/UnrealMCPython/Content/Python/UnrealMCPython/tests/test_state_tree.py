@@ -754,3 +754,62 @@ class TestStateTreeActions(MCPTestCase):
     def test_add_state_tree_blueprint_node_missing_param(self):
         r = self.call("state_tree_actions", "ue_add_state_tree_blueprint_node")
         self.assertFalse(r.get("success"))
+
+    # ── crash guards ──────────────────────────────────────────────────────────
+
+    def test_list_state_tree_blueprint_nodes_excludes_compiler_artefacts(self):
+        """SKEL_/REINST_/TRASHCLASS_ classes are registered but unusable as nodes.
+
+        Listing them doubled the result in a real project and every one of them
+        fails on add, so the list has to filter them.
+        """
+        self._skip_if_no_helper()
+        self._ensure_bp_task()
+        r = self.call("state_tree_actions", "ue_list_state_tree_blueprint_nodes",
+                      node_kind="task")
+        self.assertSuccess(r)
+        names = [n["name"] for n in r["blueprint_nodes"]]
+        self.assertIn("MCP_TestSTTask_C", names)
+        bad = [n for n in names
+               if n.startswith(("SKEL_", "REINST_", "TRASHCLASS_"))]
+        self.assertEqual(bad, [], f"compiler artefacts leaked into the list: {bad}")
+
+    def test_add_state_tree_binding_rejects_struct_root_into_property_ref(self):
+        """A PropertyRef bound to a struct root crashes the compiler, so refuse it.
+
+        Regression test for a hard editor crash: the binding was accepted and
+        reported resolved=True, then compile_state_tree died on
+        `Assertion failed: (Index >= 0) & (Index < ArrayNum)` inside
+        IsPropertyAccessibleForPropertyRef. Guarding at bind time is the only place
+        the caller can still be told something useful.
+
+        This project ships no node carrying a PropertyRef, and one cannot be authored
+        from here — `add_variable` has no PropertyRef type. So the test skips rather
+        than asserting something it did not exercise. The guard was verified by hand
+        against the original crash repro in a project that does have such tasks
+        (MadorasRebirth: STT_SelectSlot.Slot, STT_Cooldown.CooldownPropRef).
+        """
+        self._skip_if_no_helper()
+        self.skipTest("no PropertyRef-bearing node available in this project to bind against")
+
+    def test_add_state_tree_binding_still_allows_struct_root_for_plain_targets(self):
+        """The guard must not block ordinary struct-root bindings, which are valid."""
+        self._skip_if_no_helper()
+        host = self._add_host_state("MCP_PlainRootBind")
+        try:
+            src = self.call("state_tree_actions", "ue_add_state_tree_node",
+                            asset_path=self._st_path, state_path=host,
+                            node_kind="task", node_struct=self._DELAY_TASK)
+            self.assertSuccess(src)
+            tgt = self.call("state_tree_actions", "ue_add_state_tree_node",
+                            asset_path=self._st_path, state_path=host,
+                            node_kind="task", node_struct=self._DELAY_TASK)
+            self.assertSuccess(tgt)
+            # Duration is a plain float, not a PropertyRef: a normal binding, unaffected.
+            r = self.call("state_tree_actions", "ue_add_state_tree_binding",
+                          asset_path=self._st_path,
+                          source_struct_id=src["struct_id"], source_path="Duration",
+                          target_struct_id=tgt["struct_id"], target_path="Duration")
+            self.assertSuccess(r)
+        finally:
+            self._drop_state(host)
