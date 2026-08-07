@@ -841,9 +841,29 @@ CATALOG = {
         },
     },
     'state_tree': {
+        'add_child_state': {
+            'params': "asset_path, parent_state_path, name, state_type='State', save=False",
+            'doc': 'Adds a state under parent_state_path, or a new subtree when it is empty (requires the UnrealMCPythonStateTree plugin).',
+        },
+        'add_state_tree_binding': {
+            'params': 'asset_path, source_struct_id, source_path, target_struct_id, target_path, save=False',
+            'doc': 'Binds one StateTree property to another; IDs come from get_state_tree_bindable_structs (requires the UnrealMCPythonStateTree plugin).',
+        },
+        'compile_state_tree': {
+            'params': 'asset_path, save=False',
+            'doc': 'Compiles a StateTree and returns the compiler log (requires the UnrealMCPythonStateTree plugin).',
+        },
         'get_state_details': {
             'params': 'asset_path, state_path',
             'doc': 'Full detail of one state including task parameters (requires the StateTree plugin).',
+        },
+        'get_state_tree_bindable_structs': {
+            'params': "asset_path, target_struct_id=''",
+            'doc': 'Lists the struct IDs a binding can use; with target_struct_id, what may bind into it (requires the UnrealMCPythonStateTree plugin).',
+        },
+        'get_state_tree_bindings': {
+            'params': 'asset_path',
+            'doc': "Lists a StateTree's existing property bindings (requires the UnrealMCPythonStateTree plugin).",
         },
         'get_state_tree_structure': {
             'params': 'asset_path',
@@ -856,6 +876,18 @@ CATALOG = {
         'list_state_trees': {
             'params': "path='/Game'",
             'doc': 'Lists every StateTree asset under a content path (requires the StateTree plugin).',
+        },
+        'remove_state': {
+            'params': 'asset_path, state_path, save=False',
+            'doc': 'Removes a state and everything under it (requires the UnrealMCPythonStateTree plugin).',
+        },
+        'remove_state_tree_binding': {
+            'params': 'asset_path, target_struct_id, target_path, save=False',
+            'doc': 'Removes whatever is bound into a StateTree property path (requires the UnrealMCPythonStateTree plugin).',
+        },
+        'validate_state_tree': {
+            'params': 'asset_path, save=False',
+            'doc': "Applies schema rules and fixes up a StateTree's editor data — this WRITES (requires the UnrealMCPythonStateTree plugin).",
         },
     },
     'static_mesh': {

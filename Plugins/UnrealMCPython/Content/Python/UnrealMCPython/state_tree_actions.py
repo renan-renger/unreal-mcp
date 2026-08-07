@@ -14,6 +14,13 @@ _EDITOR_DATA_PROPERTY = "EditorData"
 _STATE_TREE_MISSING = ("Requires the StateTree plugin. Enable it in Edit > Plugins "
                        "and restart the editor.")
 
+# Authoring needs C++ the read path did not: the StateTree editor API is not
+# script-exposed, so it lives in a separate optional plugin rather than in
+# UnrealMCPython itself — a hard dependency there would force StateTree on every
+# consumer project and take the whole MCP server down when it is disabled.
+_HELPER_MISSING = ("Requires the UnrealMCPythonStateTree plugin. Enable it in "
+                   "Edit > Plugins, then rebuild the editor with it closed.")
+
 # Native nodes live in an FInstancedStruct whose type name only shows up in the
 # exported text; Blueprint nodes carry a real UObject instead.
 _SCRIPT_PATH_RE = re.compile(r"/Script/[A-Za-z0-9_.]+")
@@ -28,6 +35,43 @@ def _require_state_tree():
                 "message": "MCPythonHelper.get_object_property_raw is missing. "
                            "Rebuild the plugin with the editor closed."}
     return None
+
+
+def _require_helper():
+    """Returns an error dict when the authoring plugin is not loaded, else None."""
+    guard = _require_state_tree()
+    if guard:
+        return guard
+    if not hasattr(unreal, "MCPythonStateTreeHelper"):
+        return {"success": False, "message": _HELPER_MISSING}
+    return None
+
+
+def _load_state_tree(asset_path):
+    """(state_tree, error_dict). Only one is set."""
+    if not unreal.EditorAssetLibrary.does_asset_exist(asset_path):
+        return None, {"success": False, "message": f"Asset not found: {asset_path}"}
+
+    st = unreal.EditorAssetLibrary.load_asset(asset_path)
+    if not isinstance(st, unreal.StateTree):
+        got = st.get_class().get_name() if st else "None"
+        return None, {"success": False,
+                      "message": f"Not a StateTree asset: {asset_path} (got {got})"}
+    return st, None
+
+
+def _finish(payload, asset_path, save):
+    """Normalises the C++ payload and, when asked, saves.
+
+    The helper reports asset_path as an object path ("/Game/X.X"); the read actions
+    report the content path the caller passed in. Overwrite so both halves of the
+    domain speak the same dialect. A failed action never saves.
+    """
+    result = json.loads(payload)
+    result["asset_path"] = asset_path
+    if save and result.get("success"):
+        result["saved"] = bool(unreal.EditorAssetLibrary.save_asset(asset_path))
+    return json.dumps(result)
 
 
 def _load_editor_data(asset_path):
@@ -286,6 +330,178 @@ def ue_lint_state_tree(asset_path: str = None) -> str:
             "counts": counts,
             "findings": findings,
         })
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})
+
+
+# ── Authoring (needs the UnrealMCPythonStateTree plugin) ──────────────────────
+
+
+def ue_compile_state_tree(asset_path: str = None, save: bool = False) -> str:
+    """Compiles a StateTree and returns the compiler log (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    if asset_path is None:
+        return json.dumps({"success": False,
+                           "message": "Required parameter 'asset_path' is missing."})
+    try:
+        st, err = _load_state_tree(asset_path)
+        if err:
+            return json.dumps(err)
+        return _finish(unreal.MCPythonStateTreeHelper.compile_state_tree(st), asset_path, save)
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})
+
+
+def ue_validate_state_tree(asset_path: str = None, save: bool = False) -> str:
+    """Applies schema rules and fixes up a StateTree's editor data — this WRITES (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    if asset_path is None:
+        return json.dumps({"success": False,
+                           "message": "Required parameter 'asset_path' is missing."})
+    try:
+        st, err = _load_state_tree(asset_path)
+        if err:
+            return json.dumps(err)
+        return _finish(unreal.MCPythonStateTreeHelper.validate_state_tree(st), asset_path, save)
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})
+
+
+def ue_add_child_state(asset_path: str = None, parent_state_path: str = None,
+                       name: str = None, state_type: str = "State",
+                       save: bool = False) -> str:
+    """Adds a state under parent_state_path, or a new subtree when it is empty (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    if asset_path is None or name is None:
+        return json.dumps({"success": False,
+                           "message": "Required parameters: asset_path, name."})
+    try:
+        st, err = _load_state_tree(asset_path)
+        if err:
+            return json.dumps(err)
+        # An omitted parent means "new subtree root", which the helper spells as "".
+        payload = unreal.MCPythonStateTreeHelper.add_child_state(
+            st, parent_state_path or "", name, state_type)
+        return _finish(payload, asset_path, save)
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})
+
+
+def ue_remove_state(asset_path: str = None, state_path: str = None,
+                    save: bool = False) -> str:
+    """Removes a state and everything under it (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    if asset_path is None or state_path is None:
+        return json.dumps({"success": False,
+                           "message": "Required parameters: asset_path, state_path."})
+    try:
+        st, err = _load_state_tree(asset_path)
+        if err:
+            return json.dumps(err)
+        return _finish(unreal.MCPythonStateTreeHelper.remove_state(st, state_path),
+                       asset_path, save)
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})
+
+
+def ue_get_state_tree_bindable_structs(asset_path: str = None,
+                                       target_struct_id: str = "") -> str:
+    """Lists the struct IDs a binding can use; with target_struct_id, what may bind into it (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    if asset_path is None:
+        return json.dumps({"success": False,
+                           "message": "Required parameter 'asset_path' is missing."})
+    try:
+        st, err = _load_state_tree(asset_path)
+        if err:
+            return json.dumps(err)
+        payload = unreal.MCPythonStateTreeHelper.get_state_tree_bindable_structs(
+            st, target_struct_id or "")
+        return _finish(payload, asset_path, False)
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})
+
+
+def ue_get_state_tree_bindings(asset_path: str = None) -> str:
+    """Lists a StateTree's existing property bindings (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    if asset_path is None:
+        return json.dumps({"success": False,
+                           "message": "Required parameter 'asset_path' is missing."})
+    try:
+        st, err = _load_state_tree(asset_path)
+        if err:
+            return json.dumps(err)
+        return _finish(unreal.MCPythonStateTreeHelper.get_state_tree_bindings(st),
+                       asset_path, False)
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})
+
+
+def ue_add_state_tree_binding(asset_path: str = None,
+                              source_struct_id: str = None, source_path: str = None,
+                              target_struct_id: str = None, target_path: str = None,
+                              save: bool = False) -> str:
+    """Binds one StateTree property to another; IDs come from get_state_tree_bindable_structs (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    missing = [n for n, v in (("asset_path", asset_path),
+                              ("source_struct_id", source_struct_id),
+                              ("source_path", source_path),
+                              ("target_struct_id", target_struct_id),
+                              ("target_path", target_path)) if v is None]
+    if missing:
+        return json.dumps({"success": False,
+                           "message": f"Required parameters missing: {', '.join(missing)}."})
+    try:
+        st, err = _load_state_tree(asset_path)
+        if err:
+            return json.dumps(err)
+        payload = unreal.MCPythonStateTreeHelper.add_state_tree_binding(
+            st, source_struct_id, source_path, target_struct_id, target_path)
+        return _finish(payload, asset_path, save)
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})
+
+
+def ue_remove_state_tree_binding(asset_path: str = None, target_struct_id: str = None,
+                                 target_path: str = None, save: bool = False) -> str:
+    """Removes whatever is bound into a StateTree property path (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    if asset_path is None or target_struct_id is None or target_path is None:
+        return json.dumps({"success": False,
+                           "message": "Required parameters: asset_path, target_struct_id, "
+                                      "target_path."})
+    try:
+        st, err = _load_state_tree(asset_path)
+        if err:
+            return json.dumps(err)
+        payload = unreal.MCPythonStateTreeHelper.remove_state_tree_binding(
+            st, target_struct_id, target_path)
+        return _finish(payload, asset_path, save)
     except Exception as e:
         return json.dumps({"success": False, "message": str(e),
                            "traceback": traceback.format_exc()})
