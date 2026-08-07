@@ -177,4 +177,30 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
 	static FString AddStateTreeBlueprintNode(UStateTree* StateTree, const FString& StatePath,
 	                                         const FString& NodeKind, const FString& BlueprintClass);
+
+	// --- Parameters --------------------------------------------------------
+	// Parameters are what a PropertyRef binds to. Without them a tree using any
+	// PropertyRef-bearing task authors and lints clean but cannot compile.
+
+	/** Lists the tree's root parameters, or a state's when StatePath is given. */
+	UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+	static FString ListStateTreeParameters(UStateTree* StateTree, const FString& StatePath);
+
+	/**
+	 * Adds a parameter to the tree root, or to a state when StatePath is given.
+	 *
+	 * Type is an EPropertyBagPropertyType name: Bool, Byte, Int32, Int64, Float,
+	 * Double, Name, String, Text, Enum, Struct, Object, SoftObject, Class or
+	 * SoftClass. Enum, Struct, Object, SoftObject, Class and SoftClass also need
+	 * ValueTypeObject -- the path of the enum, struct or class being referred to.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+	static FString AddStateTreeParameter(UStateTree* StateTree, const FString& StatePath,
+	                                     const FString& Name, const FString& Type,
+	                                     const FString& ValueTypeObject);
+
+	/** Removes a parameter by name from the tree root, or from a state. */
+	UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+	static FString RemoveStateTreeParameter(UStateTree* StateTree, const FString& StatePath,
+	                                        const FString& Name);
 };

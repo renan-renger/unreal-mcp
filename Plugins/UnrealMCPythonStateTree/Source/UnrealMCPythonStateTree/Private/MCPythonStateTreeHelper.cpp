@@ -11,6 +11,7 @@
 #include "StateTreeEditorNode.h"
 #include "StateTreeEditorPropertyBindings.h"
 #include "StateTreePropertyRefHelpers.h"
+#include "StructUtils/PropertyBag.h"
 #include "StateTreeEvaluatorBase.h"
 #include "StateTreeState.h"
 #include "StateTreeTaskBase.h"
@@ -1548,5 +1549,234 @@ FString UMCPythonStateTreeHelper::AddStateTreeBlueprintNode(UStateTree* StateTre
 	Obj->SetStringField(TEXT("blueprint_class"), Class->GetPathName());
 	Obj->SetStringField(TEXT("struct_id"), Node->ID.ToString(EGuidFormats::DigitsWithHyphens));
 	Obj->SetBoolField(TEXT("replaced_existing"), bReplaced);
+	return SerializeJsonObj(Obj);
+}
+
+// ── parameters ────────────────────────────────────────────────────────────────
+
+namespace
+{
+
+/** The bag a parameter action operates on: the tree's root bag, or a state's. */
+FInstancedPropertyBag* ResolveParameterBag(UStateTreeEditorData* EditorData, const FString& StatePath,
+                                           FString& OutError, UStateTreeState** OutState)
+{
+	*OutState = nullptr;
+	if (StatePath.IsEmpty())
+	{
+		// The RootParameters member is deprecated for public access; the engine reaches
+		// the bag by const_casting this getter in its own compiler and editor data, so
+		// that is the supported way in.
+		return &const_cast<FInstancedPropertyBag&>(EditorData->GetRootParametersPropertyBag());
+	}
+
+	UStateTreeState* State = FindStateByPath(EditorData, StatePath);
+	if (!State)
+	{
+		OutError = MakeStateNotFoundError(EditorData, StatePath);
+		return nullptr;
+	}
+	*OutState = State;
+	return &State->Parameters.Parameters;
+}
+
+/** One parameter as JSON. */
+TSharedRef<FJsonObject> ParameterToJson(const FPropertyBagPropertyDesc& Desc)
+{
+	const TSharedRef<FJsonObject> Obj = MakeShared<FJsonObject>();
+	Obj->SetStringField(TEXT("name"), Desc.Name.ToString());
+	Obj->SetStringField(TEXT("type"),
+		StaticEnum<EPropertyBagPropertyType>()->GetNameStringByValue(static_cast<int64>(Desc.ValueType)));
+	Obj->SetStringField(TEXT("id"), Desc.ID.ToString(EGuidFormats::DigitsWithHyphens));
+	if (Desc.ValueTypeObject)
+	{
+		Obj->SetStringField(TEXT("value_type_object"), Desc.ValueTypeObject->GetPathName());
+	}
+	return Obj;
+}
+
+/** Types that carry no meaning without an accompanying enum/struct/class. */
+bool TypeNeedsValueObject(const EPropertyBagPropertyType Type)
+{
+	return Type == EPropertyBagPropertyType::Enum
+		|| Type == EPropertyBagPropertyType::Struct
+		|| Type == EPropertyBagPropertyType::Object
+		|| Type == EPropertyBagPropertyType::SoftObject
+		|| Type == EPropertyBagPropertyType::Class
+		|| Type == EPropertyBagPropertyType::SoftClass;
+}
+
+} // namespace
+
+FString UMCPythonStateTreeHelper::ListStateTreeParameters(UStateTree* StateTree, const FString& StatePath)
+{
+	FString Error;
+	UStateTreeEditorData* EditorData = GetEditorData(StateTree, Error);
+	if (!EditorData)
+	{
+		return MakeJsonError(Error);
+	}
+
+	UStateTreeState* State = nullptr;
+	FInstancedPropertyBag* Bag = ResolveParameterBag(EditorData, StatePath, Error, &State);
+	if (!Bag)
+	{
+		return Error;   // already a JSON error payload
+	}
+
+	TArray<TSharedPtr<FJsonValue>> Items;
+	if (const UPropertyBag* BagStruct = Bag->GetPropertyBagStruct())
+	{
+		for (const FPropertyBagPropertyDesc& Desc : BagStruct->GetPropertyDescs())
+		{
+			Items.Add(MakeShared<FJsonValueObject>(ParameterToJson(Desc)));
+		}
+	}
+
+	const TSharedRef<FJsonObject> Obj = MakeShared<FJsonObject>();
+	Obj->SetBoolField(TEXT("success"), true);
+	Obj->SetStringField(TEXT("asset_path"), StateTree->GetPathName());
+	Obj->SetStringField(TEXT("owner"), State ? MakeStatePath(State) : TEXT("<root>"));
+	// The struct ID a binding needs as its source when pointing at these parameters.
+	Obj->SetStringField(TEXT("struct_id"),
+		State ? State->Parameters.ID.ToString(EGuidFormats::DigitsWithHyphens)
+		      : EditorData->GetRootParametersGuid().ToString(EGuidFormats::DigitsWithHyphens));
+	Obj->SetArrayField(TEXT("parameters"), Items);
+	Obj->SetNumberField(TEXT("count"), Items.Num());
+	return SerializeJsonObj(Obj);
+}
+
+FString UMCPythonStateTreeHelper::AddStateTreeParameter(UStateTree* StateTree, const FString& StatePath,
+                                                        const FString& Name, const FString& Type,
+                                                        const FString& ValueTypeObject)
+{
+	FString Error;
+	UStateTreeEditorData* EditorData = GetEditorData(StateTree, Error);
+	if (!EditorData)
+	{
+		return MakeJsonError(Error);
+	}
+	if (Name.IsEmpty())
+	{
+		return MakeJsonError(TEXT("Name is required."));
+	}
+
+	EPropertyBagPropertyType ResolvedType = EPropertyBagPropertyType::None;
+	if (!ResolveEnum(Type, ResolvedType, Error))
+	{
+		return MakeJsonError(Error);
+	}
+	if (ResolvedType == EPropertyBagPropertyType::None)
+	{
+		return MakeJsonError(TEXT("Type 'None' is not a usable parameter type."));
+	}
+
+	UObject* TypeObject = nullptr;
+	if (TypeNeedsValueObject(ResolvedType))
+	{
+		if (ValueTypeObject.IsEmpty())
+		{
+			return MakeJsonError(FString::Printf(
+				TEXT("Type '%s' needs ValueTypeObject -- the path of the enum, struct or class."),
+				*Type));
+		}
+		TypeObject = LoadObject<UObject>(nullptr, *ValueTypeObject);
+		if (!TypeObject)
+		{
+			// A class asset is reached by its generated class, which LoadObject<UObject>
+			// on the asset path alone will not produce.
+			TypeObject = LoadObject<UClass>(nullptr, *ValueTypeObject);
+		}
+		if (!TypeObject)
+		{
+			return MakeJsonError(FString::Printf(
+				TEXT("Could not load ValueTypeObject '%s'."), *ValueTypeObject));
+		}
+	}
+	else if (!ValueTypeObject.IsEmpty())
+	{
+		return MakeJsonError(FString::Printf(
+			TEXT("Type '%s' takes no ValueTypeObject."), *Type));
+	}
+
+	UStateTreeState* State = nullptr;
+	FInstancedPropertyBag* Bag = ResolveParameterBag(EditorData, StatePath, Error, &State);
+	if (!Bag)
+	{
+		return Error;
+	}
+
+	if (Bag->FindPropertyDescByName(FName(*Name)))
+	{
+		return MakeJsonError(FString::Printf(
+			TEXT("A parameter named '%s' already exists here."), *Name));
+	}
+
+	MarkDirty(StateTree, EditorData);
+	if (State)
+	{
+		State->Modify();
+	}
+	// bOverwrite=false: the duplicate check above owns that decision, and silently
+	// replacing a parameter would break every binding already pointing at it.
+	Bag->AddProperty(FName(*Name), ResolvedType, TypeObject, /*bOverwrite*/false);
+
+	const FPropertyBagPropertyDesc* Added = Bag->FindPropertyDescByName(FName(*Name));
+	if (!Added)
+	{
+		return MakeJsonError(FString::Printf(
+			TEXT("The property bag rejected parameter '%s' of type '%s'."), *Name, *Type));
+	}
+
+	const TSharedRef<FJsonObject> Obj = ParameterToJson(*Added);
+	Obj->SetBoolField(TEXT("success"), true);
+	Obj->SetStringField(TEXT("asset_path"), StateTree->GetPathName());
+	Obj->SetStringField(TEXT("owner"), State ? MakeStatePath(State) : TEXT("<root>"));
+	Obj->SetStringField(TEXT("struct_id"),
+		State ? State->Parameters.ID.ToString(EGuidFormats::DigitsWithHyphens)
+		      : EditorData->GetRootParametersGuid().ToString(EGuidFormats::DigitsWithHyphens));
+	return SerializeJsonObj(Obj);
+}
+
+FString UMCPythonStateTreeHelper::RemoveStateTreeParameter(UStateTree* StateTree, const FString& StatePath,
+                                                           const FString& Name)
+{
+	FString Error;
+	UStateTreeEditorData* EditorData = GetEditorData(StateTree, Error);
+	if (!EditorData)
+	{
+		return MakeJsonError(Error);
+	}
+	if (Name.IsEmpty())
+	{
+		return MakeJsonError(TEXT("Name is required."));
+	}
+
+	UStateTreeState* State = nullptr;
+	FInstancedPropertyBag* Bag = ResolveParameterBag(EditorData, StatePath, Error, &State);
+	if (!Bag)
+	{
+		return Error;
+	}
+
+	if (!Bag->FindPropertyDescByName(FName(*Name)))
+	{
+		return MakeJsonError(FString::Printf(
+			TEXT("No parameter named '%s' here."), *Name));
+	}
+
+	MarkDirty(StateTree, EditorData);
+	if (State)
+	{
+		State->Modify();
+	}
+	Bag->RemovePropertiesByName({FName(*Name)});
+
+	const TSharedRef<FJsonObject> Obj = MakeShared<FJsonObject>();
+	Obj->SetBoolField(TEXT("success"), true);
+	Obj->SetStringField(TEXT("asset_path"), StateTree->GetPathName());
+	Obj->SetStringField(TEXT("owner"), State ? MakeStatePath(State) : TEXT("<root>"));
+	Obj->SetStringField(TEXT("removed"), Name);
+	Obj->SetNumberField(TEXT("count"), Bag->GetNumPropertiesInBag());
 	return SerializeJsonObj(Obj);
 }

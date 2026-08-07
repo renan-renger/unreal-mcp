@@ -813,3 +813,103 @@ class TestStateTreeActions(MCPTestCase):
             self.assertSuccess(r)
         finally:
             self._drop_state(host)
+
+    # ── parameters ────────────────────────────────────────────────────────────
+
+    def test_parameter_round_trip_root(self):
+        """Add a root parameter, read it back, remove it.
+
+        Root parameters are the thing a property reference binds to; without them
+        a tree using any PropertyRef-bearing task cannot be compiled at all.
+        """
+        self._skip_if_no_helper()
+        before = self.call("state_tree_actions", "ue_list_state_tree_parameters",
+                           asset_path=self._st_path)
+        self.assertSuccess(before)
+        try:
+            added = self.call("state_tree_actions", "ue_add_state_tree_parameter",
+                              asset_path=self._st_path, name="MCP_Quota", param_type="Int32")
+            self.assertSuccess(added)
+            self.assertEqual(added["type"], "Int32")
+            # The struct_id is what a binding needs as its source; without it the
+            # parameter is unreachable even though it exists.
+            self.assertTrue(added["struct_id"])
+
+            listed = self.call("state_tree_actions", "ue_list_state_tree_parameters",
+                               asset_path=self._st_path)
+            self.assertSuccess(listed)
+            self.assertEqual(listed["count"], before["count"] + 1)
+            mine = [p for p in listed["parameters"] if p["name"] == "MCP_Quota"]
+            self.assertEqual(len(mine), 1, listed["parameters"])
+            self.assertEqual(mine[0]["type"], "Int32")
+        finally:
+            self.call("state_tree_actions", "ue_remove_state_tree_parameter",
+                      asset_path=self._st_path, name="MCP_Quota")
+        after = self.call("state_tree_actions", "ue_list_state_tree_parameters",
+                          asset_path=self._st_path)
+        self.assertEqual(after["count"], before["count"])
+
+    def test_parameter_on_a_state(self):
+        self._skip_if_no_helper()
+        host = self._add_host_state("MCP_ParamState")
+        try:
+            r = self.call("state_tree_actions", "ue_add_state_tree_parameter",
+                          asset_path=self._st_path, state_path=host,
+                          name="MCP_StateParam", param_type="Float")
+            self.assertSuccess(r)
+            listed = self.call("state_tree_actions", "ue_list_state_tree_parameters",
+                               asset_path=self._st_path, state_path=host)
+            self.assertSuccess(listed)
+            self.assertEqual([p["name"] for p in listed["parameters"]], ["MCP_StateParam"])
+            # A state parameter must not leak into the root bag.
+            root = self.call("state_tree_actions", "ue_list_state_tree_parameters",
+                             asset_path=self._st_path)
+            self.assertNotIn("MCP_StateParam", [p["name"] for p in root["parameters"]])
+        finally:
+            self._drop_state(host)
+
+    def test_add_state_tree_parameter_rejects_duplicate(self):
+        """Overwriting would silently break every binding pointing at the old one."""
+        self._skip_if_no_helper()
+        self.call("state_tree_actions", "ue_add_state_tree_parameter",
+                  asset_path=self._st_path, name="MCP_Dup", param_type="Bool")
+        try:
+            again = self.call("state_tree_actions", "ue_add_state_tree_parameter",
+                              asset_path=self._st_path, name="MCP_Dup", param_type="Bool")
+            self.assertFalse(again.get("success"))
+        finally:
+            self.call("state_tree_actions", "ue_remove_state_tree_parameter",
+                      asset_path=self._st_path, name="MCP_Dup")
+
+    def test_add_state_tree_parameter_struct_needs_value_type_object(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_add_state_tree_parameter",
+                      asset_path=self._st_path, name="MCP_NoStruct", param_type="Struct")
+        self.assertFalse(r.get("success"))
+
+    def test_add_state_tree_parameter_scalar_rejects_value_type_object(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_add_state_tree_parameter",
+                      asset_path=self._st_path, name="MCP_BadScalar", param_type="Int32",
+                      value_type_object="/Script/CoreUObject.Vector")
+        self.assertFalse(r.get("success"))
+
+    def test_add_state_tree_parameter_unknown_type(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_add_state_tree_parameter",
+                      asset_path=self._st_path, name="MCP_BadType", param_type="Quaternion")
+        self.assertFalse(r.get("success"))
+
+    def test_add_state_tree_parameter_missing_param(self):
+        r = self.call("state_tree_actions", "ue_add_state_tree_parameter")
+        self.assertFalse(r.get("success"))
+
+    def test_remove_state_tree_parameter_unknown(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_remove_state_tree_parameter",
+                      asset_path=self._st_path, name="MCP_NeverExisted")
+        self.assertFalse(r.get("success"))
+
+    def test_list_state_tree_parameters_missing_param(self):
+        r = self.call("state_tree_actions", "ue_list_state_tree_parameters")
+        self.assertFalse(r.get("success"))
