@@ -36,6 +36,9 @@ public class UnrealMCPythonStateTree : ModuleRules
 				"SlateCore",
 				"GameplayTags",
 				"PropertyBindingUtils",
+				// Blueprint node classes are discovered through the asset registry so
+				// that unloaded Blueprints are listed too.
+				"AssetRegistry",
 			}
 			);
 	}

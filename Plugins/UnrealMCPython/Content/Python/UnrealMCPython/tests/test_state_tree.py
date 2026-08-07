@@ -56,6 +56,8 @@ class TestStateTreeActions(MCPTestCase):
         # next run reuses it instead of prompting.
         if cls._st_path:
             cls.delete_asset(cls._st_path)
+        # Same for the Blueprint task fixture, which only some tests create.
+        cls.delete_asset(f"{TEST_ROOT}/MCP_TestSTTask")
 
     def _skip_if_no_st(self):
         if not self._st_path:
@@ -639,4 +641,116 @@ class TestStateTreeActions(MCPTestCase):
 
     def test_set_state_selection_behavior_missing_param(self):
         r = self.call("state_tree_actions", "ue_set_state_selection_behavior")
+        self.assertFalse(r.get("success"))
+
+    # ── Blueprint nodes ───────────────────────────────────────────────────────
+
+    _BP_TASK_PATH = TEST_ROOT + "/MCP_TestSTTask"
+
+    def _ensure_bp_task(self):
+        """Authors a Blueprint task class to add, or skips when that is impossible.
+
+        The sample project ships no Blueprint tasks, so the round trip has to make
+        its own. Reused across tests rather than recreated: create_asset over an
+        existing object opens a blocking modal, same trap as the tree fixture.
+        """
+        if not hasattr(unreal, "StateTreeTaskBlueprintBase"):
+            self.skipTest("StateTreeTaskBlueprintBase is not exposed to Python")
+        if unreal.EditorAssetLibrary.does_asset_exist(self._BP_TASK_PATH):
+            return self._BP_TASK_PATH
+        factory = unreal.BlueprintFactory()
+        factory.set_editor_property("parent_class", unreal.StateTreeTaskBlueprintBase)
+        asset = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
+            "MCP_TestSTTask", TEST_ROOT, unreal.Blueprint, factory)
+        if not asset:
+            self.skipTest("Could not create a Blueprint task asset")
+        return self._BP_TASK_PATH
+
+    def test_list_state_tree_blueprint_nodes(self):
+        self._skip_if_no_helper()
+        self._ensure_bp_task()
+        r = self.call("state_tree_actions", "ue_list_state_tree_blueprint_nodes",
+                      node_kind="task")
+        self.assertSuccess(r)
+        self.assertEqual(r["count"], len(r["blueprint_nodes"]))
+        self.assertEqual(r["blueprint_base"], "StateTreeTaskBlueprintBase")
+        # The task we just authored must be discoverable, or nothing downstream
+        # can reference it.
+        names = [n["name"] for n in r["blueprint_nodes"]]
+        self.assertIn("MCP_TestSTTask_C", names)
+
+    def test_list_state_tree_blueprint_nodes_unknown_kind(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_list_state_tree_blueprint_nodes",
+                      node_kind="nonsense")
+        self.assertFalse(r.get("success"))
+
+    def test_blueprint_node_round_trip(self):
+        """Add a Blueprint task by class path and read it back off the state.
+
+        This is the action that closes StateTree authoring end to end: without it a
+        tree built through MCP could only ever use engine-native tasks.
+        """
+        self._skip_if_no_helper()
+        bp = self._ensure_bp_task()
+        host = self._add_host_state("MCP_BPNodeHost")
+        try:
+            added = self.call("state_tree_actions", "ue_add_state_tree_blueprint_node",
+                              asset_path=self._st_path, state_path=host,
+                              node_kind="task", blueprint_class=bp)
+            self.assertSuccess(added)
+            self.assertTrue(added["blueprint_class"].endswith("MCP_TestSTTask_C"))
+
+            # Read back through the structure reader: the write's own echo would pass
+            # even if the wrapper never took the class.
+            details = self.call("state_tree_actions", "ue_get_state_details",
+                                asset_path=self._st_path, state_path=host)
+            self.assertSuccess(details)
+            blueprint_tasks = [t for t in details["tasks"] if t.get("kind") == "blueprint"]
+            self.assertEqual(len(blueprint_tasks), 1, details["tasks"])
+            self.assertEqual(blueprint_tasks[0]["class"], "MCP_TestSTTask_C")
+
+            removed = self.call("state_tree_actions", "ue_remove_state_tree_node",
+                                asset_path=self._st_path, state_path=host,
+                                node_kind="task", struct_id=added["struct_id"])
+            self.assertSuccess(removed)
+        finally:
+            self._drop_state(host)
+
+    def test_add_state_tree_blueprint_node_accepts_generated_class_path(self):
+        """Both /Game/X and /Game/X.X_C must resolve, since callers have either."""
+        self._skip_if_no_helper()
+        bp = self._ensure_bp_task()
+        host = self._add_host_state("MCP_BPNodePathForm")
+        try:
+            generated = f"{bp}.{bp.rsplit('/', 1)[-1]}_C"
+            r = self.call("state_tree_actions", "ue_add_state_tree_blueprint_node",
+                          asset_path=self._st_path, state_path=host,
+                          node_kind="task", blueprint_class=generated)
+            self.assertSuccess(r)
+        finally:
+            self._drop_state(host)
+
+    def test_add_state_tree_blueprint_node_wrong_base(self):
+        """A Blueprint task is not a condition; adding it as one must fail."""
+        self._skip_if_no_helper()
+        bp = self._ensure_bp_task()
+        host = self._add_host_state("MCP_BPNodeWrongBase")
+        try:
+            r = self.call("state_tree_actions", "ue_add_state_tree_blueprint_node",
+                          asset_path=self._st_path, state_path=host,
+                          node_kind="enter_condition", blueprint_class=bp)
+            self.assertFalse(r.get("success"))
+        finally:
+            self._drop_state(host)
+
+    def test_add_state_tree_blueprint_node_unknown_class(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_add_state_tree_blueprint_node",
+                      asset_path=self._st_path, state_path=self._root_path(),
+                      node_kind="task", blueprint_class="/Game/Nope/DoesNotExist")
+        self.assertFalse(r.get("success"))
+
+    def test_add_state_tree_blueprint_node_missing_param(self):
+        r = self.call("state_tree_actions", "ue_add_state_tree_blueprint_node")
         self.assertFalse(r.get("success"))

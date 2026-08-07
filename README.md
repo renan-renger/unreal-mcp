@@ -30,7 +30,7 @@
 
 Unreal MCP connects AI assistants to the Unreal Editor through the [Model Context Protocol](https://modelcontextprotocol.io/). Spawn actors, build Blueprint graphs, construct Behavior Trees, design UMG widgets, edit materials, author cinematics — all from natural language.
 
-**253 actions across 21 domains**, plus `execute_python` as an escape hatch — run any BlueprintCallable function or editor subsystem the engine exposes to Python, on the fly.
+**274 actions across 22 domains**, plus `execute_python` as an escape hatch — run any BlueprintCallable function or editor subsystem the engine exposes to Python, on the fly.
 
 **Easy to extend.** Adding an action is a Python function plus a catalog regen — no C++ and no editor rebuild on the Python path. When you need something Python doesn't expose (e.g. reference-skeleton bones), an optional C++ helper layer is there too. See [CLAUDE.md](CLAUDE.md) for the step-by-step workflow.
 
@@ -44,12 +44,13 @@ Unreal MCP connects AI assistants to the Unreal Editor through the [Model Contex
 
 ## Features
 
-Each row is one **namespace tool**. The action set is large but the tool list stays small, so it never bloats the model's context. **253 actions across 21 domains.**
+Each row is one **namespace tool**. The action set is large but the tool list stays small, so it never bloats the model's context. **274 actions across 22 domains.**
 
 | Domain | Capabilities | Actions |
 |---|---|:---:|
 | **actor** | Spawn (class/object/surface raycast), transform get/set, properties, live component properties, hierarchy (attach/detach), folders, tags, bounds, selection, duplication, class queries. | 36 |
 | **asset** | Duplicate/rename/delete/save, list, dependencies & referencers, metadata tags, directories, search, FBX import/export, texture import, glTF/glb import. | 21 |
+| **state_tree** | Read trees, states, tasks & bindings; author states, native and Blueprint nodes, transitions, selection behaviour and property bindings; compile, validate, lint. (needs the UnrealMCPythonStateTree companion plugin) | 21 |
 | **material** | Create materials & instances, author expression graphs, connect to material properties, MI parameters (scalar/vector/texture/switch), reparent, auto-layout, introspection. | 20 |
 | **blueprint** | Create Blueprints, read/build graphs, add/connect/remove nodes, member variables (+ flags), SCS components, compile, auto-layout. | 19 |
 | **util** | Run arbitrary Unreal Python, console commands, CVar get/set, world↔screen projection, viewport camera, PIE control, project info, class/enum reflection, output log, log verbosity, LiveCoding compile (Windows only). | 19 |
@@ -103,6 +104,27 @@ The Python path needs no C++ and no editor rebuild. New domain? Drop in a
 `<domain>_actions.py` and list it in the generator. For an API that Python doesn't
 expose, an optional C++ helper (`MCPythonHelper`) is available. Full details in
 [CLAUDE.md](CLAUDE.md).
+
+### What an assistant can and cannot author
+
+The line is **C++ versus Blueprint**, not "structure versus logic":
+
+- **Blueprint logic is writable.** The `blueprint` domain builds graphs — event
+  overrides, branches, sequences, casts, variable get/set, function calls — and
+  compiles them, all in the running editor. Same for the assets every other domain
+  owns.
+- **C++ is not**, and cannot be. The MCP server runs *inside* the editor process
+  (`FUnrealMCPythonModule::StartupModule`). Adopting a C++ change means the editor
+  exits, UnrealBuildTool runs, and the editor relaunches — which kills the MCP
+  bridge partway through. An action that rebuilt C++ would have to kill the process
+  that owes you its result.
+
+So changing native code is a close → build → reopen loop driven from a shell, not
+from MCP. In-editor Python *can* write files and spawn processes, so it is not a
+permission limit — the running editor simply cannot adopt a module it has already
+loaded. Live Coding is the only in-process patch path and it is Windows-only here
+(compiled out under `WITH_LIVE_CODING`), and even there it cannot register new
+`UFUNCTION` reflection.
 
 ## Installation
 
@@ -200,7 +222,7 @@ Add the server to your MCP client config:
 
 1. Restart your MCP client
 2. The MCP server starts automatically
-3. Verify — you should see the 21 Unreal-MCPython domain tools listed in your client
+3. Verify — you should see the 22 Unreal-MCPython domain tools listed in your client
 
 ## Usage
 
@@ -233,6 +255,13 @@ Pass any action below to its domain tool. Use `{ "action": "list_actions" }` on 
 <summary><strong>asset</strong> (21)</summary>
 
 `asset_exists` · `delete_asset` · `delete_directory` · `duplicate_asset` · `export_fbx` · `find_by_query` · `find_referencers` · `get_asset_info` · `get_dependencies` · `get_gltf_import_status` · `get_metadata_tag` · `get_static_mesh_details` · `import_fbx` · `import_gltf` · `import_texture` · `list_assets` · `make_directory` · `remove_metadata_tag` · `rename_asset` · `save_asset` · `set_metadata_tag`
+
+</details>
+
+<details>
+<summary><strong>state_tree</strong> (21)</summary>
+
+`add_child_state` · `add_state_tree_binding` · `add_state_tree_blueprint_node` · `add_state_tree_node` · `add_state_tree_transition` · `compile_state_tree` · `get_state_details` · `get_state_tree_bindable_structs` · `get_state_tree_bindings` · `get_state_tree_structure` · `get_state_tree_transitions` · `lint_state_tree` · `list_state_tree_blueprint_nodes` · `list_state_tree_node_types` · `list_state_trees` · `remove_state` · `remove_state_tree_binding` · `remove_state_tree_node` · `remove_state_tree_transition` · `set_state_selection_behavior` · `validate_state_tree`
 
 </details>
 

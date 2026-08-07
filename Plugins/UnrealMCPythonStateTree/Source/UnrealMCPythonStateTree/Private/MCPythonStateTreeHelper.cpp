@@ -15,6 +15,13 @@
 #include "StateTreeTaskBase.h"
 #include "StateTreeTypes.h"
 
+#include "Blueprint/StateTreeConditionBlueprintBase.h"
+#include "Blueprint/StateTreeConsiderationBlueprintBase.h"
+#include "Blueprint/StateTreeEvaluatorBlueprintBase.h"
+#include "Blueprint/StateTreeTaskBlueprintBase.h"
+
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
 #include "UObject/UObjectIterator.h"
 
 #include "Dom/JsonObject.h"
@@ -1201,5 +1208,230 @@ FString UMCPythonStateTreeHelper::SetStateSelectionBehavior(UStateTree* StateTre
 	Obj->SetStringField(TEXT("previous_behavior"), Previous);
 	Obj->SetStringField(TEXT("selection_behavior"),
 		StaticEnum<EStateTreeStateSelectionBehavior>()->GetNameStringByValue(static_cast<int64>(Resolved)));
+	return SerializeJsonObj(Obj);
+}
+
+// ── Blueprint nodes ───────────────────────────────────────────────────────────
+
+namespace
+{
+
+/**
+ * Which Blueprint base a node kind accepts.
+ *
+ * A Blueprint node is a UClass wrapped in a struct, not a struct in its own right,
+ * so it needs a separate table from FNodeKindInfo — the wrapper is chosen by base
+ * class exactly the way StateTreeEditorNodeUtils::SetNodeTypeClass does it.
+ */
+const UClass* BlueprintBaseForKind(const FNodeKindInfo& Info)
+{
+	if (FCString::Stricmp(Info.Kind, TEXT("enter_condition")) == 0)
+	{
+		return UStateTreeConditionBlueprintBase::StaticClass();
+	}
+	if (FCString::Stricmp(Info.Kind, TEXT("consideration")) == 0)
+	{
+		return UStateTreeConsiderationBlueprintBase::StaticClass();
+	}
+	if (FCString::Stricmp(Info.Kind, TEXT("evaluator")) == 0)
+	{
+		return UStateTreeEvaluatorBlueprintBase::StaticClass();
+	}
+	// task, single_task and global_task all take a Blueprint task.
+	return UStateTreeTaskBlueprintBase::StaticClass();
+}
+
+/** Initialises a node as the wrapper matching InClass's Blueprint base. */
+bool InitializeBlueprintNode(FStateTreeEditorNode& Node, UObject* Outer, UClass* InClass)
+{
+	if (InClass->IsChildOf(UStateTreeTaskBlueprintBase::StaticClass()))
+	{
+		FStateTreeBlueprintTaskWrapper Wrapper;
+		Wrapper.TaskClass = InClass;
+		Node.InitializeAs<FStateTreeBlueprintTaskWrapper>(Outer, MoveTemp(Wrapper));
+		return true;
+	}
+	if (InClass->IsChildOf(UStateTreeEvaluatorBlueprintBase::StaticClass()))
+	{
+		FStateTreeBlueprintEvaluatorWrapper Wrapper;
+		Wrapper.EvaluatorClass = InClass;
+		Node.InitializeAs<FStateTreeBlueprintEvaluatorWrapper>(Outer, MoveTemp(Wrapper));
+		return true;
+	}
+	if (InClass->IsChildOf(UStateTreeConditionBlueprintBase::StaticClass()))
+	{
+		FStateTreeBlueprintConditionWrapper Wrapper;
+		Wrapper.ConditionClass = InClass;
+		Node.InitializeAs<FStateTreeBlueprintConditionWrapper>(Outer, MoveTemp(Wrapper));
+		return true;
+	}
+	if (InClass->IsChildOf(UStateTreeConsiderationBlueprintBase::StaticClass()))
+	{
+		FStateTreeBlueprintConsiderationWrapper Wrapper;
+		Wrapper.ConsiderationClass = InClass;
+		Node.InitializeAs<FStateTreeBlueprintConsiderationWrapper>(Outer, MoveTemp(Wrapper));
+		return true;
+	}
+	return false;
+}
+
+/**
+ * Resolves a Blueprint class from either the generated-class path or the asset path.
+ *
+ * Callers hand us whatever list_state_tree_blueprint_nodes or the content browser
+ * gave them, and "/Game/AI/BT_Foo" is the more natural of the two to type.
+ */
+UClass* ResolveBlueprintClass(const FString& Path)
+{
+	FString Candidate = Path;
+	if (!Candidate.EndsWith(TEXT("_C")))
+	{
+		FString ObjectName = Candidate;
+		int32 Dot = INDEX_NONE;
+		if (Candidate.FindChar(TEXT('.'), Dot))
+		{
+			ObjectName = Candidate.Mid(Dot + 1);
+			Candidate = Candidate.Left(Dot);
+		}
+		else
+		{
+			int32 Slash = INDEX_NONE;
+			Candidate.FindLastChar(TEXT('/'), Slash);
+			ObjectName = Slash == INDEX_NONE ? Candidate : Candidate.Mid(Slash + 1);
+		}
+		Candidate = FString::Printf(TEXT("%s.%s_C"), *Candidate, *ObjectName);
+	}
+	return LoadObject<UClass>(nullptr, *Candidate);
+}
+
+} // namespace
+
+FString UMCPythonStateTreeHelper::ListStateTreeBlueprintNodes(const FString& NodeKind)
+{
+	const FNodeKindInfo* Info = FindNodeKind(NodeKind);
+	if (!Info)
+	{
+		return MakeUnknownKindError(NodeKind);
+	}
+
+	const UClass* Base = BlueprintBaseForKind(*Info);
+
+	IAssetRegistry& AssetRegistry =
+		FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+
+	// Derived-class names cover Blueprints that are not loaded, which is the whole
+	// point — a project's task Blueprints are rarely all in memory.
+	TSet<FTopLevelAssetPath> Derived;
+	AssetRegistry.GetDerivedClassNames({Base->GetClassPathName()}, {}, Derived);
+
+	TArray<TSharedPtr<FJsonValue>> Items;
+	for (const FTopLevelAssetPath& ClassPath : Derived)
+	{
+		const FString ClassPathString = ClassPath.ToString();
+		// Native bases show up here too; only Blueprint generated classes end in _C.
+		if (!ClassPathString.EndsWith(TEXT("_C")))
+		{
+			continue;
+		}
+		const TSharedRef<FJsonObject> Obj = MakeShared<FJsonObject>();
+		Obj->SetStringField(TEXT("class_path"), ClassPathString);
+		Obj->SetStringField(TEXT("name"), ClassPath.GetAssetName().ToString());
+		Items.Add(MakeShared<FJsonValueObject>(Obj));
+	}
+
+	Items.Sort([](const TSharedPtr<FJsonValue>& A, const TSharedPtr<FJsonValue>& B)
+	{
+		return A->AsObject()->GetStringField(TEXT("name")) < B->AsObject()->GetStringField(TEXT("name"));
+	});
+
+	const TSharedRef<FJsonObject> Obj = MakeShared<FJsonObject>();
+	Obj->SetBoolField(TEXT("success"), true);
+	Obj->SetStringField(TEXT("node_kind"), Info->Kind);
+	Obj->SetStringField(TEXT("blueprint_base"), Base->GetName());
+	Obj->SetArrayField(TEXT("blueprint_nodes"), Items);
+	Obj->SetNumberField(TEXT("count"), Items.Num());
+	return SerializeJsonObj(Obj);
+}
+
+FString UMCPythonStateTreeHelper::AddStateTreeBlueprintNode(UStateTree* StateTree, const FString& StatePath,
+                                                            const FString& NodeKind, const FString& BlueprintClass)
+{
+	FString Error;
+	UStateTreeEditorData* EditorData = GetEditorData(StateTree, Error);
+	if (!EditorData)
+	{
+		return MakeJsonError(Error);
+	}
+
+	const FNodeKindInfo* Info = FindNodeKind(NodeKind);
+	if (!Info)
+	{
+		return MakeUnknownKindError(NodeKind);
+	}
+	if (BlueprintClass.IsEmpty())
+	{
+		return MakeJsonError(
+			TEXT("BlueprintClass is required. Take one from list_state_tree_blueprint_nodes."));
+	}
+
+	UClass* Class = ResolveBlueprintClass(BlueprintClass);
+	if (!Class)
+	{
+		return MakeJsonError(FString::Printf(
+			TEXT("Could not load a Blueprint class from '%s'. Take one from list_state_tree_blueprint_nodes."),
+			*BlueprintClass));
+	}
+
+	const UClass* Base = BlueprintBaseForKind(*Info);
+	if (!Class->IsChildOf(Base))
+	{
+		return MakeJsonError(FString::Printf(
+			TEXT("'%s' does not derive from %s, so it cannot be added as a '%s'."),
+			*Class->GetName(), *Base->GetName(), Info->Kind));
+	}
+
+	UStateTreeState* State = nullptr;
+	if (!Info->bGlobal)
+	{
+		State = FindStateByPath(EditorData, StatePath);
+		if (!State)
+		{
+			return MakeStateNotFoundError(EditorData, StatePath);
+		}
+	}
+
+	MarkDirty(StateTree, EditorData);
+	if (State)
+	{
+		State->Modify();
+	}
+
+	FStateTreeEditorNode* Node = nullptr;
+	bool bReplaced = false;
+	if (Info->bSingle)
+	{
+		bReplaced = State->SingleTask.Node.IsValid();
+		Node = &State->SingleTask;
+	}
+	else
+	{
+		TArray<FStateTreeEditorNode>* Nodes = ResolveNodeArray(EditorData, State, *Info);
+		Node = &Nodes->AddDefaulted_GetRef();
+	}
+
+	if (!InitializeBlueprintNode(*Node, EditorData, Class))
+	{
+		return MakeJsonError(FString::Printf(
+			TEXT("'%s' is not a StateTree Blueprint node class."), *Class->GetName()));
+	}
+
+	const TSharedRef<FJsonObject> Obj = MakeShared<FJsonObject>();
+	Obj->SetBoolField(TEXT("success"), true);
+	Obj->SetStringField(TEXT("asset_path"), StateTree->GetPathName());
+	Obj->SetStringField(TEXT("state_path"), State ? MakeStatePath(State) : TEXT("<global>"));
+	Obj->SetStringField(TEXT("node_kind"), Info->Kind);
+	Obj->SetStringField(TEXT("blueprint_class"), Class->GetPathName());
+	Obj->SetStringField(TEXT("struct_id"), Node->ID.ToString(EGuidFormats::DigitsWithHyphens));
+	Obj->SetBoolField(TEXT("replaced_existing"), bReplaced);
 	return SerializeJsonObj(Obj);
 }

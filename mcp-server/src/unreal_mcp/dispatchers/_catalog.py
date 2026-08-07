@@ -849,6 +849,10 @@ CATALOG = {
             'params': 'asset_path, source_struct_id, source_path, target_struct_id, target_path, save=False',
             'doc': 'Binds one StateTree property to another; IDs come from get_state_tree_bindable_structs (requires the UnrealMCPythonStateTree plugin).',
         },
+        'add_state_tree_blueprint_node': {
+            'params': "asset_path, state_path, node_kind='task', blueprint_class, save=False",
+            'doc': 'Adds a Blueprint node by class path, e.g. /Game/AI/BT_Foo (requires the UnrealMCPythonStateTree plugin).',
+        },
         'add_state_tree_node': {
             'params': "asset_path, state_path, node_kind='task', node_struct, save=False",
             'doc': 'Adds a task, condition, consideration or evaluator and returns its struct_id (requires the UnrealMCPythonStateTree plugin).',
@@ -884,6 +888,10 @@ CATALOG = {
         'lint_state_tree': {
             'params': 'asset_path',
             'doc': 'Flags StateTree authoring traps: dead-end empty states, finishing global tasks (requires the StateTree plugin).',
+        },
+        'list_state_tree_blueprint_nodes': {
+            'params': "node_kind='task'",
+            'doc': 'Lists Blueprint task/condition/consideration/evaluator classes, including unloaded ones (requires the UnrealMCPythonStateTree plugin).',
         },
         'list_state_tree_node_types': {
             'params': "node_kind=''",
