@@ -417,6 +417,66 @@ def ue_remove_state(asset_path: str = None, state_path: str = None,
                            "traceback": traceback.format_exc()})
 
 
+def ue_list_state_tree_node_types(node_kind: str = "") -> str:
+    """Lists the task/condition/consideration/evaluator types a state tree can use (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    try:
+        # No asset needed: this reads the reflection registry, not a tree. The helper
+        # already returns a JSON string, and there is no asset_path to normalise.
+        return unreal.MCPythonStateTreeHelper.list_state_tree_node_types(node_kind or "")
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})
+
+
+def ue_add_state_tree_node(asset_path: str = None, state_path: str = None,
+                           node_kind: str = "task", node_struct: str = None,
+                           save: bool = False) -> str:
+    """Adds a task, condition, consideration or evaluator and returns its struct_id (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    if asset_path is None or node_struct is None:
+        return json.dumps({"success": False,
+                           "message": "Required parameters: asset_path, node_struct."})
+    try:
+        st, err = _load_state_tree(asset_path)
+        if err:
+            return json.dumps(err)
+        # The global kinds live on the tree, not on a state, so an omitted state_path is
+        # legitimate for those and rejected by the helper for the rest.
+        payload = unreal.MCPythonStateTreeHelper.add_state_tree_node(
+            st, state_path or "", node_kind, node_struct)
+        return _finish(payload, asset_path, save)
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})
+
+
+def ue_remove_state_tree_node(asset_path: str = None, state_path: str = None,
+                              node_kind: str = "task", struct_id: str = None,
+                              save: bool = False) -> str:
+    """Removes a task/condition/consideration/evaluator by struct_id (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    if asset_path is None or struct_id is None:
+        return json.dumps({"success": False,
+                           "message": "Required parameters: asset_path, struct_id."})
+    try:
+        st, err = _load_state_tree(asset_path)
+        if err:
+            return json.dumps(err)
+        payload = unreal.MCPythonStateTreeHelper.remove_state_tree_node(
+            st, state_path or "", node_kind, struct_id)
+        return _finish(payload, asset_path, save)
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})
+
+
 def ue_get_state_tree_bindable_structs(asset_path: str = None,
                                        target_struct_id: str = "") -> str:
     """Lists the struct IDs a binding can use; with target_struct_id, what may bind into it (requires the UnrealMCPythonStateTree plugin)."""

@@ -849,6 +849,10 @@ CATALOG = {
             'params': 'asset_path, source_struct_id, source_path, target_struct_id, target_path, save=False',
             'doc': 'Binds one StateTree property to another; IDs come from get_state_tree_bindable_structs (requires the UnrealMCPythonStateTree plugin).',
         },
+        'add_state_tree_node': {
+            'params': "asset_path, state_path, node_kind='task', node_struct, save=False",
+            'doc': 'Adds a task, condition, consideration or evaluator and returns its struct_id (requires the UnrealMCPythonStateTree plugin).',
+        },
         'compile_state_tree': {
             'params': 'asset_path, save=False',
             'doc': 'Compiles a StateTree and returns the compiler log (requires the UnrealMCPythonStateTree plugin).',
@@ -873,6 +877,10 @@ CATALOG = {
             'params': 'asset_path',
             'doc': 'Flags StateTree authoring traps: dead-end empty states, finishing global tasks (requires the StateTree plugin).',
         },
+        'list_state_tree_node_types': {
+            'params': "node_kind=''",
+            'doc': 'Lists the task/condition/consideration/evaluator types a state tree can use (requires the UnrealMCPythonStateTree plugin).',
+        },
         'list_state_trees': {
             'params': "path='/Game'",
             'doc': 'Lists every StateTree asset under a content path (requires the StateTree plugin).',
@@ -884,6 +892,10 @@ CATALOG = {
         'remove_state_tree_binding': {
             'params': 'asset_path, target_struct_id, target_path, save=False',
             'doc': 'Removes whatever is bound into a StateTree property path (requires the UnrealMCPythonStateTree plugin).',
+        },
+        'remove_state_tree_node': {
+            'params': "asset_path, state_path, node_kind='task', struct_id, save=False",
+            'doc': 'Removes a task/condition/consideration/evaluator by struct_id (requires the UnrealMCPythonStateTree plugin).',
         },
         'validate_state_tree': {
             'params': 'asset_path, save=False',
