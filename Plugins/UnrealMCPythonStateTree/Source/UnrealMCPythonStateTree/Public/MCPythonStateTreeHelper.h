@@ -159,4 +159,22 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
 	static FString SetStateSelectionBehavior(UStateTree* StateTree, const FString& StatePath,
 	                                         const FString& Behavior);
+
+	// --- Blueprint nodes ---------------------------------------------------
+	// A Blueprint task is not a struct — it is a UClass carried by a wrapper
+	// struct, so AddStateTreeNode (which takes a UScriptStruct) cannot reach one.
+
+	/** Lists Blueprint node classes for a kind, including ones not currently loaded. */
+	UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+	static FString ListStateTreeBlueprintNodes(const FString& NodeKind);
+
+	/**
+	 * Adds a Blueprint task, condition, consideration or evaluator by class path.
+	 *
+	 * BlueprintClass accepts either the generated class ("/Game/AI/BT_Foo.BT_Foo_C")
+	 * or the asset path ("/Game/AI/BT_Foo"), which is resolved to the former.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+	static FString AddStateTreeBlueprintNode(UStateTree* StateTree, const FString& StatePath,
+	                                         const FString& NodeKind, const FString& BlueprintClass);
 };

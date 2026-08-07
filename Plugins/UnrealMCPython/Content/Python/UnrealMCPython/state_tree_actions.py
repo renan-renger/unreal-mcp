@@ -656,3 +656,39 @@ def ue_set_state_selection_behavior(asset_path: str = None, state_path: str = No
     except Exception as e:
         return json.dumps({"success": False, "message": str(e),
                            "traceback": traceback.format_exc()})
+
+
+def ue_list_state_tree_blueprint_nodes(node_kind: str = "task") -> str:
+    """Lists Blueprint task/condition/consideration/evaluator classes, including unloaded ones (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    try:
+        # Same as list_state_tree_node_types: reads the asset registry, not a tree,
+        # so there is no asset_path to normalise and the helper's JSON stands alone.
+        return unreal.MCPythonStateTreeHelper.list_state_tree_blueprint_nodes(node_kind or "task")
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})
+
+
+def ue_add_state_tree_blueprint_node(asset_path: str = None, state_path: str = None,
+                                     node_kind: str = "task", blueprint_class: str = None,
+                                     save: bool = False) -> str:
+    """Adds a Blueprint node by class path, e.g. /Game/AI/BT_Foo (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    if asset_path is None or blueprint_class is None:
+        return json.dumps({"success": False,
+                           "message": "Required parameters: asset_path, blueprint_class."})
+    try:
+        st, err = _load_state_tree(asset_path)
+        if err:
+            return json.dumps(err)
+        payload = unreal.MCPythonStateTreeHelper.add_state_tree_blueprint_node(
+            st, state_path or "", node_kind, blueprint_class)
+        return _finish(payload, asset_path, save)
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})
