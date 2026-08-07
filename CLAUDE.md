@@ -14,11 +14,11 @@ Request path: `LLM → FastMCP dispatcher → TCP :12029 → C++ server → ue_*
 
 ## Architecture (the non-obvious parts)
 
-**Namespace dispatcher, not one-tool-per-action.** The MCP surface is **21 domain tools**
+**Namespace dispatcher, not one-tool-per-action.** The MCP surface is **22 domain tools**
 (one per key of `CATALOG`: `actor`, `anim_blueprint`, `animation`, `asset`, `behavior_tree`,
 `blueprint`, `control_rig`, `data_table`, `editor`, `game`, `gas`, `layer`, `level`,
-`level_sequence`, `material`, `retarget`, `static_mesh`, `texture`, `umg`, `util`,
-`vision`), each taking `(action, params)`. This keeps the tool-list context cost fixed
+`level_sequence`, `material`, `retarget`, `state_tree`, `static_mesh`, `texture`, `umg`,
+`util`, `vision`), each taking `(action, params)`. This keeps the tool-list context cost fixed
 no matter how many actions exist. `action="list_actions"` returns a domain's catalog.
 See `mcp-server/src/unreal_mcp/dispatcher.py`.
 
@@ -228,6 +228,31 @@ handler, its log capture and `HandleLiveCodingCompile` are `#if`-guarded). On a
 Linux editor `util livecoding_compile` therefore fails with an actionable
 message instead of silently reporting a clean compile, and **every** C++ change —
 not just a new UFUNCTION — needs the full editor-closed rebuild above.
+
+**MCP cannot drive that rebuild itself, and no action would fix it.** The TCP
+server runs *inside* the editor process (`FUnrealMCPythonModule::StartupModule`),
+so adopting a C++ change means killing the process that hosts the bridge. An
+MCP action that rebuilt C++ would have to take down the very thing that owes the
+caller a response, and nothing would be left to relaunch the editor or report the
+result. The close → build → reopen loop therefore belongs to whatever is driving
+*outside* the editor (a shell, CI, the agent's own terminal) — that survives the
+gap; an MCP client alone does not.
+
+This is not a permission limit. In-editor Python can write files and spawn
+processes (verified: `open(...)`, `subprocess.run` both work), so it could edit
+the `.cpp` and even invoke `Build.sh`. What it cannot do is make a running editor
+adopt a module it has already loaded.
+
+**The line is C++ versus Blueprint, not structure versus logic.** Blueprint
+*logic* is fully authorable in-process — the `blueprint` domain writes event
+overrides, branches, sequences, casts, variable get/set and function calls, then
+compiles. So "the assistant can only do structure, not behaviour" is wrong; only
+native C++ is out of reach. Two gotchas when authoring graphs:
+- `add_blueprint_node` takes `type`, not `node_type`, in its `node_json`.
+- It returns `success` for a **deprecated** event name and the failure only
+  surfaces at compile (`Cannot override ... declared in a parent with a different
+  signature`). Node-creation success proves nothing about whether the graph builds
+  — compile before believing it.
 
 ## Conventions
 
