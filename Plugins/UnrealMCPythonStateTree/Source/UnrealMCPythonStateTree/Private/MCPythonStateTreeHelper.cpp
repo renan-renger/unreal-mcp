@@ -1780,3 +1780,159 @@ FString UMCPythonStateTreeHelper::RemoveStateTreeParameter(UStateTree* StateTree
 	Obj->SetNumberField(TEXT("count"), Bag->GetNumPropertiesInBag());
 	return SerializeJsonObj(Obj);
 }
+
+// ── node property inspection ──────────────────────────────────────────────────
+
+namespace
+{
+
+/**
+ * Maps a Blueprint pin type onto the EPropertyBagPropertyType name that
+ * AddStateTreeParameter takes.
+ *
+ * The pin categories are compared as literals rather than against
+ * UEdGraphSchema_K2::PC_*, which would pull the BlueprintGraph module in for a
+ * dozen string constants that have not changed in years.
+ */
+FString PinTypeToParameterType(const FEdGraphPinType& PinType)
+{
+	static const TMap<FName, FString> Map = {
+		{TEXT("bool"),        TEXT("Bool")},
+		{TEXT("byte"),        TEXT("Byte")},
+		{TEXT("int"),         TEXT("Int32")},
+		{TEXT("int64"),       TEXT("Int64")},
+		{TEXT("float"),       TEXT("Float")},
+		{TEXT("double"),      TEXT("Double")},
+		{TEXT("name"),        TEXT("Name")},
+		{TEXT("string"),      TEXT("String")},
+		{TEXT("text"),        TEXT("Text")},
+		{TEXT("enum"),        TEXT("Enum")},
+		{TEXT("struct"),      TEXT("Struct")},
+		{TEXT("object"),      TEXT("Object")},
+		{TEXT("softobject"),  TEXT("SoftObject")},
+		{TEXT("class"),       TEXT("Class")},
+		{TEXT("softclass"),   TEXT("SoftClass")},
+	};
+
+	// "real" is the modern float/double pin; the width lives in the sub-category.
+	if (PinType.PinCategory == TEXT("real"))
+	{
+		return PinType.PinSubCategory == TEXT("double") ? TEXT("Double") : TEXT("Float");
+	}
+	if (const FString* Found = Map.Find(PinType.PinCategory))
+	{
+		return *Found;
+	}
+	return FString();
+}
+
+/** Describes one accepted type of a property reference. */
+TSharedRef<FJsonObject> AcceptedTypeToJson(const FEdGraphPinType& PinType)
+{
+	const TSharedRef<FJsonObject> Obj = MakeShared<FJsonObject>();
+	Obj->SetStringField(TEXT("pin_category"), PinType.PinCategory.ToString());
+	const FString ParameterType = PinTypeToParameterType(PinType);
+	if (!ParameterType.IsEmpty())
+	{
+		Obj->SetStringField(TEXT("parameter_type"), ParameterType);
+	}
+	if (const UObject* SubObject = PinType.PinSubCategoryObject.Get())
+	{
+		// Struct/Object/Enum parameters need this as value_type_object.
+		Obj->SetStringField(TEXT("value_type_object"), SubObject->GetPathName());
+	}
+	if (PinType.IsContainer())
+	{
+		Obj->SetBoolField(TEXT("container"), true);
+	}
+	return Obj;
+}
+
+} // namespace
+
+FString UMCPythonStateTreeHelper::ListStateTreeNodeProperties(UStateTree* StateTree, const FString& StructId)
+{
+	FString Error;
+	UStateTreeEditorData* EditorData = GetEditorData(StateTree, Error);
+	if (!EditorData)
+	{
+		return MakeJsonError(Error);
+	}
+
+	FGuid Guid;
+	if (!ParseGuid(StructId, Guid, Error))
+	{
+		return MakeJsonError(Error);
+	}
+
+	const FStateTreeEditorNode* Node = FindNodeById(EditorData, Guid);
+	if (!Node)
+	{
+		return MakeJsonError(FString::Printf(
+			TEXT("No node with struct ID '%s'. Take one from get_state_tree_bindable_structs."),
+			*StructId));
+	}
+
+	const FStateTreeDataView Instance = Node->GetInstance();
+	const UStruct* InstanceStruct = Instance.GetStruct();
+	if (!InstanceStruct)
+	{
+		return MakeJsonError(TEXT("The node has no instance data to inspect."));
+	}
+
+	TArray<TSharedPtr<FJsonValue>> Items;
+	for (TFieldIterator<FProperty> It(InstanceStruct); It; ++It)
+	{
+		const FProperty* Property = *It;
+		const TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
+		Entry->SetStringField(TEXT("name"), Property->GetName());
+		Entry->SetStringField(TEXT("cpp_type"), Property->GetCPPType());
+
+		const bool bIsRef = UE::StateTree::PropertyRefHelpers::IsPropertyRef(*Property);
+		Entry->SetBoolField(TEXT("is_property_ref"), bIsRef);
+		if (bIsRef)
+		{
+			// This is the answer the compiler withholds: what the ref will accept.
+			const void* RefAddress = Instance.GetMemory()
+				? Property->ContainerPtrToValuePtr<void>(Instance.GetMemory())
+				: nullptr;
+
+			TArray<TSharedPtr<FJsonValue>> Accepted;
+			for (const FEdGraphPinType& PinType :
+			     UE::StateTree::PropertyRefHelpers::GetPropertyRefInternalTypesAsPins(*Property))
+			{
+				Accepted.Add(MakeShared<FJsonValueObject>(AcceptedTypeToJson(PinType)));
+			}
+			// A native ref declares its types in metadata, which the call above reads.
+			// A Blueprint ref carries the type in its instance data instead, so that
+			// call returns nothing and the single-type overload is the only way in.
+			// Reporting an empty list would read as "accepts anything", which is the
+			// opposite of the truth.
+			if (Accepted.IsEmpty() && RefAddress)
+			{
+				const FEdGraphPinType PinType =
+					UE::StateTree::PropertyRefHelpers::GetPropertyRefInternalTypeAsPin(*Property, RefAddress);
+				if (!PinType.PinCategory.IsNone())
+				{
+					Accepted.Add(MakeShared<FJsonValueObject>(AcceptedTypeToJson(PinType)));
+				}
+			}
+			Entry->SetArrayField(TEXT("accepted_parameter_types"), Accepted);
+			if (RefAddress)
+			{
+				Entry->SetBoolField(TEXT("optional"),
+					UE::StateTree::PropertyRefHelpers::IsPropertyRefMarkedAsOptional(*Property, RefAddress));
+			}
+		}
+		Items.Add(MakeShared<FJsonValueObject>(Entry));
+	}
+
+	const TSharedRef<FJsonObject> Obj = MakeShared<FJsonObject>();
+	Obj->SetBoolField(TEXT("success"), true);
+	Obj->SetStringField(TEXT("asset_path"), StateTree->GetPathName());
+	Obj->SetStringField(TEXT("struct_id"), Guid.ToString(EGuidFormats::DigitsWithHyphens));
+	Obj->SetStringField(TEXT("node"), NodeDisplayName(*Node));
+	Obj->SetArrayField(TEXT("properties"), Items);
+	Obj->SetNumberField(TEXT("count"), Items.Num());
+	return SerializeJsonObj(Obj);
+}

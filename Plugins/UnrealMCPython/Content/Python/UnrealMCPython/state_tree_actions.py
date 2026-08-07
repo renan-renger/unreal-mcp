@@ -755,3 +755,22 @@ def ue_remove_state_tree_parameter(asset_path: str = None, name: str = None,
     except Exception as e:
         return json.dumps({"success": False, "message": str(e),
                            "traceback": traceback.format_exc()})
+
+
+def ue_list_state_tree_node_properties(asset_path: str = None, struct_id: str = None) -> str:
+    """Lists a node's properties and, for each property reference, the parameter types it accepts (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    if asset_path is None or struct_id is None:
+        return json.dumps({"success": False,
+                           "message": "Required parameters: asset_path, struct_id."})
+    try:
+        st, err = _load_state_tree(asset_path)
+        if err:
+            return json.dumps(err)
+        payload = unreal.MCPythonStateTreeHelper.list_state_tree_node_properties(st, struct_id)
+        return _finish(payload, asset_path, False)
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})

@@ -897,6 +897,10 @@ CATALOG = {
             'params': "node_kind='task'",
             'doc': 'Lists Blueprint task/condition/consideration/evaluator classes, including unloaded ones (requires the UnrealMCPythonStateTree plugin).',
         },
+        'list_state_tree_node_properties': {
+            'params': 'asset_path, struct_id',
+            'doc': "Lists a node's properties and, for each property reference, the parameter types it accepts (requires the UnrealMCPythonStateTree plugin).",
+        },
         'list_state_tree_node_types': {
             'params': "node_kind=''",
             'doc': 'Lists the task/condition/consideration/evaluator types a state tree can use (requires the UnrealMCPythonStateTree plugin).',
