@@ -565,3 +565,94 @@ def ue_remove_state_tree_binding(asset_path: str = None, target_struct_id: str =
     except Exception as e:
         return json.dumps({"success": False, "message": str(e),
                            "traceback": traceback.format_exc()})
+
+
+def ue_get_state_tree_transitions(asset_path: str = None, state_path: str = None) -> str:
+    """Lists a state's transitions with their trigger, target and priority (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    if asset_path is None or state_path is None:
+        return json.dumps({"success": False,
+                           "message": "Required parameters: asset_path, state_path."})
+    try:
+        st, err = _load_state_tree(asset_path)
+        if err:
+            return json.dumps(err)
+        payload = unreal.MCPythonStateTreeHelper.get_state_tree_transitions(st, state_path)
+        return _finish(payload, asset_path, False)
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})
+
+
+def ue_add_state_tree_transition(asset_path: str = None, state_path: str = None,
+                                 trigger: str = "OnStateCompleted",
+                                 transition_type: str = "GotoState",
+                                 target_state_path: str = "", priority: str = "Normal",
+                                 delay_duration: float = 0.0, save: bool = False) -> str:
+    """Adds a transition to a state and returns its index (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    if asset_path is None or state_path is None:
+        return json.dumps({"success": False,
+                           "message": "Required parameters: asset_path, state_path."})
+    try:
+        st, err = _load_state_tree(asset_path)
+        if err:
+            return json.dumps(err)
+        # target_state_path only applies to GotoState; the helper rejects it otherwise
+        # rather than accepting a value it would silently drop.
+        payload = unreal.MCPythonStateTreeHelper.add_state_tree_transition(
+            st, state_path, trigger, transition_type, target_state_path or "",
+            priority, float(delay_duration))
+        return _finish(payload, asset_path, save)
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})
+
+
+def ue_remove_state_tree_transition(asset_path: str = None, state_path: str = None,
+                                    index: int = -1, save: bool = False) -> str:
+    """Removes the transition at index from a state (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    if asset_path is None or state_path is None:
+        return json.dumps({"success": False,
+                           "message": "Required parameters: asset_path, state_path."})
+    if index < 0:
+        return json.dumps({"success": False,
+                           "message": "Parameter 'index' must be a non-negative transition index."})
+    try:
+        st, err = _load_state_tree(asset_path)
+        if err:
+            return json.dumps(err)
+        payload = unreal.MCPythonStateTreeHelper.remove_state_tree_transition(
+            st, state_path, int(index))
+        return _finish(payload, asset_path, save)
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})
+
+
+def ue_set_state_selection_behavior(asset_path: str = None, state_path: str = None,
+                                    behavior: str = None, save: bool = False) -> str:
+    """Sets how a state selects among its children, e.g. TrySelectChildrenWithHighestUtility (requires the UnrealMCPythonStateTree plugin)."""
+    guard = _require_helper()
+    if guard:
+        return json.dumps(guard)
+    if asset_path is None or state_path is None or behavior is None:
+        return json.dumps({"success": False,
+                           "message": "Required parameters: asset_path, state_path, behavior."})
+    try:
+        st, err = _load_state_tree(asset_path)
+        if err:
+            return json.dumps(err)
+        payload = unreal.MCPythonStateTreeHelper.set_state_selection_behavior(
+            st, state_path, behavior)
+        return _finish(payload, asset_path, save)
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e),
+                           "traceback": traceback.format_exc()})

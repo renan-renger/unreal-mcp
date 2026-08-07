@@ -118,4 +118,45 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
 	static FString RemoveStateTreeBinding(UStateTree* StateTree,
 	                                      const FString& TargetStructId, const FString& TargetPath);
+
+	// --- Transitions -------------------------------------------------------
+	// UStateTreeState::Transitions is BlueprintReadOnly, so Python can read the
+	// array but cannot append to it. Selection behaviour is worse: the property
+	// carries no Blueprint flag at all and is invisible to script.
+
+	/** Lists a state's transitions, structured rather than as a raw export string. */
+	UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+	static FString GetStateTreeTransitions(UStateTree* StateTree, const FString& StatePath);
+
+	/**
+	 * Appends a transition to a state and returns its index.
+	 *
+	 * Trigger is an EStateTreeTransitionTrigger name (OnStateCompleted,
+	 * OnStateSucceeded, OnStateFailed, OnTick, OnEvent, OnDelegate).
+	 * TransitionType is an EStateTreeTransitionType name; GotoState is the only
+	 * one that reads TargetStatePath, the rest resolve on their own.
+	 * Priority is an EStateTreeTransitionPriority name and defaults to Normal.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+	static FString AddStateTreeTransition(UStateTree* StateTree, const FString& StatePath,
+	                                      const FString& Trigger, const FString& TransitionType,
+	                                      const FString& TargetStatePath, const FString& Priority,
+	                                      float DelayDuration);
+
+	/** Removes the transition at Index from a state. */
+	UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+	static FString RemoveStateTreeTransition(UStateTree* StateTree, const FString& StatePath,
+	                                         int32 Index);
+
+	/**
+	 * Sets how a state treats its children when selected.
+	 *
+	 * Behaviour is an EStateTreeStateSelectionBehavior name — None, TryEnterState,
+	 * TrySelectChildrenInOrder, TrySelectChildrenAtRandom,
+	 * TrySelectChildrenWithHighestUtility,
+	 * TrySelectChildrenAtRandomWeightedByUtility or TryFollowTransitions.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+	static FString SetStateSelectionBehavior(UStateTree* StateTree, const FString& StatePath,
+	                                         const FString& Behavior);
 };

@@ -497,3 +497,146 @@ class TestStateTreeActions(MCPTestCase):
                       asset_path=self._st_path,
                       target_struct_id="not-a-guid", target_path="Bar")
         self.assertFalse(r.get("success"))
+
+    # ── transitions ───────────────────────────────────────────────────────────
+
+    def test_transition_round_trip(self):
+        """Author a transition end to end and read it back.
+
+        Like the binding round trip, this is the only test that proves a transition
+        can actually be written; the guards below only prove the parameter checks.
+        It needs two states because a GotoState transition needs somewhere to go.
+        """
+        self._skip_if_no_helper()
+        source = self._add_host_state("MCP_TransFrom")
+        target = self._add_host_state("MCP_TransTo")
+        try:
+            before = self.call("state_tree_actions", "ue_get_state_tree_transitions",
+                               asset_path=self._st_path, state_path=source)
+            self.assertSuccess(before)
+
+            added = self.call("state_tree_actions", "ue_add_state_tree_transition",
+                              asset_path=self._st_path, state_path=source,
+                              trigger="OnStateCompleted", transition_type="GotoState",
+                              target_state_path=target, priority="High")
+            self.assertSuccess(added)
+
+            listed = self.call("state_tree_actions", "ue_get_state_tree_transitions",
+                               asset_path=self._st_path, state_path=source)
+            self.assertSuccess(listed)
+            self.assertEqual(listed["count"], before["count"] + 1)
+            # Assert on content, not just the count: a transition stored with the
+            # wrong trigger or a target that never resolved would still satisfy a
+            # length check.
+            mine = listed["transitions"][added["index"]]
+            self.assertEqual(mine["trigger"], "OnStateCompleted")
+            self.assertEqual(mine["transition_type"], "GotoState")
+            self.assertEqual(mine["priority"], "High")
+            self.assertEqual(mine["target_state"], target.rsplit("/", 1)[-1])
+
+            removed = self.call("state_tree_actions", "ue_remove_state_tree_transition",
+                                asset_path=self._st_path, state_path=source,
+                                index=added["index"])
+            self.assertSuccess(removed)
+            self.assertEqual(removed["count"], before["count"])
+        finally:
+            self._drop_state(source)
+            self._drop_state(target)
+
+    def test_add_state_tree_transition_delay(self):
+        self._skip_if_no_helper()
+        host = self._add_host_state("MCP_TransDelay")
+        try:
+            r = self.call("state_tree_actions", "ue_add_state_tree_transition",
+                          asset_path=self._st_path, state_path=host,
+                          transition_type="Succeeded", delay_duration=2.5)
+            self.assertSuccess(r)
+            self.assertTrue(r["delay_transition"])
+            self.assertAlmostEqual(r["delay_duration"], 2.5, places=3)
+        finally:
+            self._drop_state(host)
+
+    def test_add_state_tree_transition_rejects_target_without_goto(self):
+        """A target path on a non-GotoState transition would be silently dropped."""
+        self._skip_if_no_helper()
+        host = self._add_host_state("MCP_TransBadTarget")
+        try:
+            r = self.call("state_tree_actions", "ue_add_state_tree_transition",
+                          asset_path=self._st_path, state_path=host,
+                          transition_type="Succeeded", target_state_path=self._root_path())
+            self.assertFalse(r.get("success"))
+        finally:
+            self._drop_state(host)
+
+    def test_add_state_tree_transition_goto_needs_target(self):
+        self._skip_if_no_helper()
+        host = self._add_host_state("MCP_TransNoTarget")
+        try:
+            r = self.call("state_tree_actions", "ue_add_state_tree_transition",
+                          asset_path=self._st_path, state_path=host,
+                          transition_type="GotoState")
+            self.assertFalse(r.get("success"))
+        finally:
+            self._drop_state(host)
+
+    def test_add_state_tree_transition_unknown_trigger(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_add_state_tree_transition",
+                      asset_path=self._st_path, state_path=self._root_path(),
+                      trigger="OnBananas", transition_type="Succeeded")
+        self.assertFalse(r.get("success"))
+
+    def test_add_state_tree_transition_missing_param(self):
+        r = self.call("state_tree_actions", "ue_add_state_tree_transition")
+        self.assertFalse(r.get("success"))
+
+    def test_get_state_tree_transitions_missing_param(self):
+        r = self.call("state_tree_actions", "ue_get_state_tree_transitions")
+        self.assertFalse(r.get("success"))
+
+    def test_get_state_tree_transitions_unknown_state(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_get_state_tree_transitions",
+                      asset_path=self._st_path, state_path="/NoSuchState")
+        self.assertFalse(r.get("success"))
+
+    def test_remove_state_tree_transition_out_of_range(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_remove_state_tree_transition",
+                      asset_path=self._st_path, state_path=self._root_path(), index=9999)
+        self.assertFalse(r.get("success"))
+
+    def test_remove_state_tree_transition_missing_param(self):
+        r = self.call("state_tree_actions", "ue_remove_state_tree_transition")
+        self.assertFalse(r.get("success"))
+
+    # ── selection behaviour ───────────────────────────────────────────────────
+
+    def test_set_state_selection_behavior_round_trip(self):
+        self._skip_if_no_helper()
+        host = self._add_host_state("MCP_SelBehavior")
+        try:
+            r = self.call("state_tree_actions", "ue_set_state_selection_behavior",
+                          asset_path=self._st_path, state_path=host,
+                          behavior="TrySelectChildrenWithHighestUtility")
+            self.assertSuccess(r)
+            self.assertEqual(r["selection_behavior"], "TrySelectChildrenWithHighestUtility")
+            self.assertEqual(r["previous_behavior"], "TrySelectChildrenInOrder")
+            # Read it back through the structure reader, not just the write's own echo.
+            details = self.call("state_tree_actions", "ue_get_state_details",
+                                asset_path=self._st_path, state_path=host)
+            self.assertSuccess(details)
+            self.assertEqual(details["selection_behavior"], "TRY_SELECT_CHILDREN_WITH_HIGHEST_UTILITY")
+        finally:
+            self._drop_state(host)
+
+    def test_set_state_selection_behavior_unknown(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_set_state_selection_behavior",
+                      asset_path=self._st_path, state_path=self._root_path(),
+                      behavior="TrySelectChildrenTelepathically")
+        self.assertFalse(r.get("success"))
+
+    def test_set_state_selection_behavior_missing_param(self):
+        r = self.call("state_tree_actions", "ue_set_state_selection_behavior")
+        self.assertFalse(r.get("success"))
