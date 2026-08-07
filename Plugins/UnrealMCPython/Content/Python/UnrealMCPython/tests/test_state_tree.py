@@ -255,6 +255,135 @@ class TestStateTreeActions(MCPTestCase):
         self.assertFalse(r.get("success"))
         self.assertIn("known_states", r)
 
+    # ── node edits ────────────────────────────────────────────────────────────
+
+    # A task that ships with StateTreeModule. Its header is private, so nothing can
+    # name the type at compile time — it is resolved by reflection name, which is the
+    # whole point of taking node_struct as a string.
+    _DELAY_TASK = "StateTreeDelayTask"
+
+    def _add_host_state(self, name):
+        """Adds a state to hang nodes off, and returns its path."""
+        added = self.call("state_tree_actions", "ue_add_child_state",
+                          asset_path=self._st_path, parent_state_path=self._root_path(),
+                          name=name)
+        self.assertSuccess(added)
+        return added["state_path"]
+
+    def _drop_state(self, state_path):
+        self.call("state_tree_actions", "ue_remove_state",
+                  asset_path=self._st_path, state_path=state_path)
+
+    def test_list_state_tree_node_types(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_list_state_tree_node_types",
+                      node_kind="task")
+        self.assertSuccess(r)
+        self.assertEqual(r["count"], len(r["node_types"]))
+        # The engine's own delay task must be discoverable, or nothing downstream
+        # can name a type to add.
+        self.assertIn(self._DELAY_TASK, [t["struct"] for t in r["node_types"]])
+        # Kind filtering means every result derives from that kind's base.
+        self.assertEqual({t["base"] for t in r["node_types"]}, {"StateTreeTaskBase"})
+
+    def test_list_state_tree_node_types_unknown_kind(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_list_state_tree_node_types",
+                      node_kind="not_a_kind")
+        self.assertFalse(r.get("success"))
+
+    def test_add_and_remove_state_tree_node(self):
+        self._skip_if_no_helper()
+        host = self._add_host_state("MCP_NodeHost")
+        try:
+            added = self.call("state_tree_actions", "ue_add_state_tree_node",
+                              asset_path=self._st_path, state_path=host,
+                              node_kind="task", node_struct=self._DELAY_TASK)
+            self.assertSuccess(added)
+            self.assertEqual(added["node_struct"], self._DELAY_TASK)
+            self.assertTrue(added["struct_id"])
+
+            # The node must show up as bindable, which is what makes it a binding target.
+            structs = self.call("state_tree_actions", "ue_get_state_tree_bindable_structs",
+                                asset_path=self._st_path)
+            self.assertSuccess(structs)
+            mine = [s for s in structs["structs"] if s["struct_id"] == added["struct_id"]]
+            self.assertEqual(len(mine), 1)
+            self.assertEqual(mine[0]["role"], "task")
+            self.assertEqual(mine[0]["owner"], host)
+
+            removed = self.call("state_tree_actions", "ue_remove_state_tree_node",
+                                asset_path=self._st_path, state_path=host,
+                                node_kind="task", struct_id=added["struct_id"])
+            self.assertSuccess(removed)
+            self.assertEqual(removed["removed_count"], 1)
+
+            after = self.call("state_tree_actions", "ue_get_state_tree_bindable_structs",
+                              asset_path=self._st_path)
+            self.assertNotIn(added["struct_id"], [s["struct_id"] for s in after["structs"]])
+        finally:
+            self._drop_state(host)
+
+    def test_add_state_tree_node_wrong_kind_for_struct(self):
+        """A task struct cannot be added as a condition."""
+        self._skip_if_no_helper()
+        host = self._add_host_state("MCP_WrongKind")
+        try:
+            r = self.call("state_tree_actions", "ue_add_state_tree_node",
+                          asset_path=self._st_path, state_path=host,
+                          node_kind="enter_condition", node_struct=self._DELAY_TASK)
+            self.assertFalse(r.get("success"))
+        finally:
+            self._drop_state(host)
+
+    def test_add_state_tree_node_unknown_struct(self):
+        self._skip_if_no_helper()
+        host = self._add_host_state("MCP_UnknownStruct")
+        try:
+            r = self.call("state_tree_actions", "ue_add_state_tree_node",
+                          asset_path=self._st_path, state_path=host,
+                          node_kind="task", node_struct="NoSuchTaskXYZ")
+            self.assertFalse(r.get("success"))
+        finally:
+            self._drop_state(host)
+
+    def test_add_state_tree_node_unknown_kind(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_add_state_tree_node",
+                      asset_path=self._st_path, state_path=self._root_path(),
+                      node_kind="not_a_kind", node_struct=self._DELAY_TASK)
+        self.assertFalse(r.get("success"))
+
+    def test_add_state_tree_node_unknown_state(self):
+        self._skip_if_no_helper()
+        r = self.call("state_tree_actions", "ue_add_state_tree_node",
+                      asset_path=self._st_path, state_path="/Nope/Nowhere",
+                      node_kind="task", node_struct=self._DELAY_TASK)
+        self.assertFalse(r.get("success"))
+        self.assertIn("known_states", r)
+
+    def test_add_state_tree_node_missing_param(self):
+        r = self.call("state_tree_actions", "ue_add_state_tree_node",
+                      asset_path=_ST_PATH)
+        self.assertFalse(r.get("success"))
+
+    def test_remove_state_tree_node_unknown_id(self):
+        """An ID that is not in the slot is an error, not a silent no-op."""
+        self._skip_if_no_helper()
+        host = self._add_host_state("MCP_RemoveUnknown")
+        try:
+            r = self.call("state_tree_actions", "ue_remove_state_tree_node",
+                          asset_path=self._st_path, state_path=host, node_kind="task",
+                          struct_id="00000000-0000-0000-0000-000000000001")
+            self.assertFalse(r.get("success"))
+        finally:
+            self._drop_state(host)
+
+    def test_remove_state_tree_node_missing_param(self):
+        r = self.call("state_tree_actions", "ue_remove_state_tree_node",
+                      asset_path=_ST_PATH)
+        self.assertFalse(r.get("success"))
+
     # ── bindings ──────────────────────────────────────────────────────────────
 
     def test_get_state_tree_bindable_structs(self):
@@ -304,6 +433,63 @@ class TestStateTreeActions(MCPTestCase):
         r = self.call("state_tree_actions", "ue_remove_state_tree_binding",
                       asset_path=_ST_PATH)
         self.assertFalse(r.get("success"))
+
+    def test_binding_round_trip(self):
+        """Author a binding end to end and read it back.
+
+        The guard tests below prove the parameter checks; this is the only test that
+        proves a binding can actually be written. It needs two nodes because a binding
+        needs both ends, and until add_state_tree_node existed a tree built through
+        this domain had none at all.
+        """
+        self._skip_if_no_helper()
+        host = self._add_host_state("MCP_BindHost")
+        try:
+            source = self.call("state_tree_actions", "ue_add_state_tree_node",
+                               asset_path=self._st_path, state_path=host,
+                               node_kind="task", node_struct=self._DELAY_TASK)
+            self.assertSuccess(source)
+            target = self.call("state_tree_actions", "ue_add_state_tree_node",
+                               asset_path=self._st_path, state_path=host,
+                               node_kind="task", node_struct=self._DELAY_TASK)
+            self.assertSuccess(target)
+
+            before = self.call("state_tree_actions", "ue_get_state_tree_bindings",
+                               asset_path=self._st_path)["count"]
+
+            bound = self.call("state_tree_actions", "ue_add_state_tree_binding",
+                              asset_path=self._st_path,
+                              source_struct_id=source["struct_id"], source_path="Duration",
+                              target_struct_id=target["struct_id"], target_path="Duration")
+            self.assertSuccess(bound)
+
+            listed = self.call("state_tree_actions", "ue_get_state_tree_bindings",
+                               asset_path=self._st_path)
+            self.assertSuccess(listed)
+            self.assertEqual(listed["count"], before + 1)
+            # Assert on content, not just on the count: a binding that lists with the
+            # wrong endpoints would satisfy a length check. resolved=True is the part
+            # that matters — it means the engine matched the path to a real property,
+            # not that a string was stored.
+            mine = [b for b in listed["bindings"]
+                    if b["target"]["struct_id"].lower() == target["struct_id"].lower()]
+            self.assertEqual(len(mine), 1, listed["bindings"])
+            self.assertEqual(mine[0]["target"]["path"], "Duration")
+            self.assertTrue(mine[0]["target"]["resolved"])
+            self.assertEqual(mine[0]["source"]["struct_id"].lower(),
+                             source["struct_id"].lower())
+            self.assertEqual(mine[0]["source"]["path"], "Duration")
+
+            removed = self.call("state_tree_actions", "ue_remove_state_tree_binding",
+                                asset_path=self._st_path,
+                                target_struct_id=target["struct_id"], target_path="Duration")
+            self.assertSuccess(removed)
+            self.assertEqual(removed["removed_count"], 1)
+            self.assertEqual(
+                self.call("state_tree_actions", "ue_get_state_tree_bindings",
+                          asset_path=self._st_path)["count"], before)
+        finally:
+            self._drop_state(host)
 
     def test_remove_state_tree_binding_bad_id(self):
         self._skip_if_no_helper()
