@@ -54,6 +54,43 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
 	static FString RemoveState(UStateTree* StateTree, const FString& StatePath);
 
+	// ── Phase B: node edits ───────────────────────────────────────────────────
+	//
+	// NodeKind names the slot a node goes into, using the same vocabulary the
+	// "role" field of GetStateTreeBindableStructs reports: task, single_task,
+	// enter_condition and consideration live on a state; evaluator and
+	// global_task live on the tree and take an empty StatePath.
+
+	/**
+	 * Lists the node types available for a NodeKind, by script struct name.
+	 *
+	 * Discovery matters here because the useful types are not reachable any other
+	 * way: FStateTreeDelayTask and friends live in StateTreeModule/Private, so no
+	 * header names them, yet they are registered UScriptStructs and bind fine.
+	 * An empty NodeKind lists every kind.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+	static FString ListStateTreeNodeTypes(const FString& NodeKind);
+
+	/**
+	 * Adds a task, condition, consideration or evaluator and returns its struct ID.
+	 *
+	 * This is what makes bindings authorable at all: a binding needs a node to bind
+	 * into, and until this existed a tree built through the MCP surface had none.
+	 *
+	 * Global tasks run for the tree's whole lifetime — one that ever calls
+	 * FinishTask terminates the tree instead of the state. Put one-shot tasks in a
+	 * state's Tasks, not in GlobalTasks.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+	static FString AddStateTreeNode(UStateTree* StateTree, const FString& StatePath,
+	                                const FString& NodeKind, const FString& NodeStruct);
+
+	/** Removes the node with StructId from the slot NodeKind names. */
+	UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+	static FString RemoveStateTreeNode(UStateTree* StateTree, const FString& StatePath,
+	                                   const FString& NodeKind, const FString& StructId);
+
 	// ── Phase C: property bindings ────────────────────────────────────────────
 
 	/**

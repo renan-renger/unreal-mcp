@@ -3,13 +3,19 @@
 #include "MCPythonStateTreeHelper.h"
 
 #include "StateTree.h"
+#include "StateTreeConditionBase.h"
+#include "StateTreeConsiderationBase.h"
 #include "StateTreeEditingSubsystem.h"
 #include "StateTreeCompilerLog.h"
 #include "StateTreeEditorData.h"
 #include "StateTreeEditorNode.h"
 #include "StateTreeEditorPropertyBindings.h"
+#include "StateTreeEvaluatorBase.h"
 #include "StateTreeState.h"
+#include "StateTreeTaskBase.h"
 #include "StateTreeTypes.h"
+
+#include "UObject/UObjectIterator.h"
 
 #include "Dom/JsonObject.h"
 #include "Logging/TokenizedMessage.h"
@@ -244,6 +250,117 @@ void MarkDirty(UStateTree* StateTree, UStateTreeEditorData* EditorData)
 	EditorData->Modify();
 	UStateTreeEditingSubsystem::MarkAsModified(StateTree);
 }
+
+// ── node kinds ────────────────────────────────────────────────────────────────
+
+/** Every slot a node can occupy, with the base struct that slot accepts. */
+struct FNodeKindInfo
+{
+	const TCHAR* Kind;
+	const UScriptStruct* Base;
+	bool bGlobal;   // lives on the tree rather than on a state
+	bool bSingle;   // one node, not an array
+};
+
+TArray<FNodeKindInfo> AllNodeKinds()
+{
+	return {
+		{TEXT("task"),            FStateTreeTaskBase::StaticStruct(),          false, false},
+		{TEXT("single_task"),     FStateTreeTaskBase::StaticStruct(),          false, true },
+		{TEXT("enter_condition"), FStateTreeConditionBase::StaticStruct(),     false, false},
+		{TEXT("consideration"),   FStateTreeConsiderationBase::StaticStruct(), false, false},
+		{TEXT("evaluator"),       FStateTreeEvaluatorBase::StaticStruct(),     true,  false},
+		{TEXT("global_task"),     FStateTreeTaskBase::StaticStruct(),          true,  false},
+	};
+}
+
+const FNodeKindInfo* FindNodeKind(const FString& Kind)
+{
+	static const TArray<FNodeKindInfo> Kinds = AllNodeKinds();
+	for (const FNodeKindInfo& Info : Kinds)
+	{
+		if (Kind.Equals(Info.Kind, ESearchCase::IgnoreCase))
+		{
+			return &Info;
+		}
+	}
+	return nullptr;
+}
+
+/** Lists the valid kinds in the error, so a typo does not need a second round trip. */
+FString MakeUnknownKindError(const FString& Kind)
+{
+	TArray<FString> Names;
+	for (const FNodeKindInfo& Info : AllNodeKinds())
+	{
+		Names.Add(Info.Kind);
+	}
+	return MakeJsonError(FString::Printf(TEXT("Unknown node kind: '%s'. Expected one of: %s."),
+	                                     *Kind, *FString::Join(Names, TEXT(", "))));
+}
+
+/**
+ * Resolves a node struct by reflection name.
+ *
+ * By name and not by type on purpose: the types worth adding (FStateTreeDelayTask,
+ * FStateTreeDebugTextTask) live in StateTreeModule/Private, so no header can name
+ * them here — but they are registered UScriptStructs, and reflection reaches them.
+ * Accepts both "StateTreeDelayTask" and "FStateTreeDelayTask".
+ */
+const UScriptStruct* FindNodeStruct(const FString& NodeStruct)
+{
+	if (const UScriptStruct* Found = FindFirstObject<UScriptStruct>(*NodeStruct, EFindFirstObjectOptions::None))
+	{
+		return Found;
+	}
+	if (NodeStruct.StartsWith(TEXT("F")))
+	{
+		return FindFirstObject<UScriptStruct>(*NodeStruct.RightChop(1), EFindFirstObjectOptions::None);
+	}
+	return nullptr;
+}
+
+/**
+ * The array a kind maps to, or null for single_task (which is one node, not an array).
+ *
+ * State is null for the global kinds, which live on the editor data instead.
+ */
+TArray<FStateTreeEditorNode>* ResolveNodeArray(UStateTreeEditorData* EditorData, UStateTreeState* State,
+                                               const FNodeKindInfo& Info)
+{
+	if (Info.bSingle)
+	{
+		return nullptr;
+	}
+	if (Info.bGlobal)
+	{
+		return FCString::Stricmp(Info.Kind, TEXT("evaluator")) == 0
+			? &EditorData->Evaluators
+			: &EditorData->GlobalTasks;
+	}
+	if (FCString::Stricmp(Info.Kind, TEXT("task")) == 0)
+	{
+		return &State->Tasks;
+	}
+	if (FCString::Stricmp(Info.Kind, TEXT("enter_condition")) == 0)
+	{
+		return &State->EnterConditions;
+	}
+	return &State->Considerations;
+}
+
+/** DisplayName metadata when the struct carries one, otherwise the reflection name. */
+FString NodeTypeDisplayName(const UScriptStruct* Struct)
+{
+#if WITH_EDITORONLY_DATA
+	const FString Meta = Struct->GetMetaData(TEXT("DisplayName"));
+	if (!Meta.IsEmpty())
+	{
+		return Meta;
+	}
+#endif
+	return Struct->GetName();
+}
 } // namespace
 
 // ── Phase B: compile and validate ─────────────────────────────────────────────
@@ -423,6 +540,219 @@ FString UMCPythonStateTreeHelper::RemoveState(UStateTree* StateTree, const FStri
 	Obj->SetStringField(TEXT("asset_path"), StateTree->GetPathName());
 	Obj->SetStringField(TEXT("state_path"), StatePath);
 	Obj->SetNumberField(TEXT("removed_state_count"), RemovedCount);
+	return SerializeJsonObj(Obj);
+}
+
+// ── Phase B: node edits ───────────────────────────────────────────────────────
+
+FString UMCPythonStateTreeHelper::ListStateTreeNodeTypes(const FString& NodeKind)
+{
+	TArray<FNodeKindInfo> Kinds;
+	if (NodeKind.IsEmpty())
+	{
+		Kinds = AllNodeKinds();
+	}
+	else
+	{
+		const FNodeKindInfo* Info = FindNodeKind(NodeKind);
+		if (!Info)
+		{
+			return MakeUnknownKindError(NodeKind);
+		}
+		Kinds.Add(*Info);
+	}
+
+	// A kind's base struct can repeat (task, single_task and global_task all take
+	// FStateTreeTaskBase), so gather per base once and report the kinds that share it.
+	TArray<TSharedPtr<FJsonValue>> Types;
+	TSet<const UScriptStruct*> Seen;
+	for (const FNodeKindInfo& Info : Kinds)
+	{
+		if (Seen.Contains(Info.Base))
+		{
+			continue;
+		}
+		Seen.Add(Info.Base);
+
+		for (TObjectIterator<UScriptStruct> It; It; ++It)
+		{
+			UScriptStruct* Struct = *It;
+			if (Struct == Info.Base || !Struct->IsChildOf(Info.Base))
+			{
+				continue;
+			}
+			// The *Base and *CommonBase layers are real structs but exist to be derived
+			// from, never instantiated. Nothing marks that in reflection, so go by name.
+			if (Struct->GetName().EndsWith(TEXT("Base")))
+			{
+				continue;
+			}
+
+			const TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
+			Entry->SetStringField(TEXT("struct"), Struct->GetName());
+			Entry->SetStringField(TEXT("display_name"), NodeTypeDisplayName(Struct));
+			Entry->SetStringField(TEXT("base"), Info.Base->GetName());
+			Types.Add(MakeShared<FJsonValueObject>(Entry));
+		}
+	}
+
+	const TSharedRef<FJsonObject> Obj = MakeShared<FJsonObject>();
+	Obj->SetBoolField(TEXT("success"), true);
+	Obj->SetStringField(TEXT("node_kind"), NodeKind);
+	Obj->SetNumberField(TEXT("count"), Types.Num());
+	Obj->SetArrayField(TEXT("node_types"), Types);
+	return SerializeJsonObj(Obj);
+}
+
+FString UMCPythonStateTreeHelper::AddStateTreeNode(UStateTree* StateTree, const FString& StatePath,
+                                                   const FString& NodeKind, const FString& NodeStruct)
+{
+	FString Error;
+	UStateTreeEditorData* EditorData = GetEditorData(StateTree, Error);
+	if (!EditorData)
+	{
+		return MakeJsonError(Error);
+	}
+
+	const FNodeKindInfo* Info = FindNodeKind(NodeKind);
+	if (!Info)
+	{
+		return MakeUnknownKindError(NodeKind);
+	}
+	if (NodeStruct.IsEmpty())
+	{
+		return MakeJsonError(TEXT("NodeStruct is required. Take one from list_state_tree_node_types."));
+	}
+
+	const UScriptStruct* Struct = FindNodeStruct(NodeStruct);
+	if (!Struct)
+	{
+		return MakeJsonError(FString::Printf(
+			TEXT("Unknown node struct: '%s'. Take one from list_state_tree_node_types."), *NodeStruct));
+	}
+	if (!Struct->IsChildOf(Info->Base))
+	{
+		return MakeJsonError(FString::Printf(
+			TEXT("'%s' is not a %s, so it cannot be added as a '%s'."),
+			*Struct->GetName(), *Info->Base->GetName(), Info->Kind));
+	}
+
+	// The global kinds hang off the editor data, so they take no state.
+	UStateTreeState* State = nullptr;
+	if (!Info->bGlobal)
+	{
+		State = FindStateByPath(EditorData, StatePath);
+		if (!State)
+		{
+			return MakeStateNotFoundError(EditorData, StatePath);
+		}
+	}
+
+	MarkDirty(StateTree, EditorData);
+	if (State)
+	{
+		State->Modify();
+	}
+
+	// InitializeAs outers the node's instance data to the editor data, which is what the
+	// StateTree editor itself does — anything else and the instance data serialises into
+	// the wrong package.
+	FStateTreeEditorNode* Node = nullptr;
+	bool bReplaced = false;
+	if (Info->bSingle)
+	{
+		bReplaced = State->SingleTask.Node.IsValid();
+		Node = &State->SingleTask;
+	}
+	else
+	{
+		TArray<FStateTreeEditorNode>* Nodes = ResolveNodeArray(EditorData, State, *Info);
+		Node = &Nodes->AddDefaulted_GetRef();
+	}
+	Node->InitializeAs(EditorData, Struct);
+
+	const TSharedRef<FJsonObject> Obj = MakeShared<FJsonObject>();
+	Obj->SetBoolField(TEXT("success"), true);
+	Obj->SetStringField(TEXT("asset_path"), StateTree->GetPathName());
+	Obj->SetStringField(TEXT("state_path"), State ? MakeStatePath(State) : TEXT("<global>"));
+	Obj->SetStringField(TEXT("node_kind"), Info->Kind);
+	Obj->SetStringField(TEXT("node_struct"), Struct->GetName());
+	Obj->SetStringField(TEXT("struct_id"), Node->ID.ToString(EGuidFormats::DigitsWithHyphens));
+	Obj->SetBoolField(TEXT("replaced_existing"), bReplaced);
+	return SerializeJsonObj(Obj);
+}
+
+FString UMCPythonStateTreeHelper::RemoveStateTreeNode(UStateTree* StateTree, const FString& StatePath,
+                                                      const FString& NodeKind, const FString& StructId)
+{
+	FString Error;
+	UStateTreeEditorData* EditorData = GetEditorData(StateTree, Error);
+	if (!EditorData)
+	{
+		return MakeJsonError(Error);
+	}
+
+	const FNodeKindInfo* Info = FindNodeKind(NodeKind);
+	if (!Info)
+	{
+		return MakeUnknownKindError(NodeKind);
+	}
+
+	FGuid Guid;
+	if (!ParseGuid(StructId, Guid, Error))
+	{
+		return MakeJsonError(Error);
+	}
+
+	UStateTreeState* State = nullptr;
+	if (!Info->bGlobal)
+	{
+		State = FindStateByPath(EditorData, StatePath);
+		if (!State)
+		{
+			return MakeStateNotFoundError(EditorData, StatePath);
+		}
+	}
+
+	MarkDirty(StateTree, EditorData);
+	if (State)
+	{
+		State->Modify();
+	}
+
+	int32 RemovedCount = 0;
+	if (Info->bSingle)
+	{
+		if (State->SingleTask.ID == Guid)
+		{
+			State->SingleTask.Reset();
+			RemovedCount = 1;
+		}
+	}
+	else
+	{
+		TArray<FStateTreeEditorNode>* Nodes = ResolveNodeArray(EditorData, State, *Info);
+		RemovedCount = Nodes->RemoveAll([&Guid](const FStateTreeEditorNode& Node)
+		{
+			return Node.ID == Guid;
+		});
+	}
+
+	// Nothing removed is a failure, not a silent no-op: the caller passed an ID that is
+	// not in that slot, and reporting success would hide the mistake.
+	if (RemovedCount == 0)
+	{
+		return MakeJsonError(FString::Printf(
+			TEXT("No '%s' node with ID %s. Take one from get_state_tree_bindable_structs."),
+			Info->Kind, *StructId));
+	}
+
+	const TSharedRef<FJsonObject> Obj = MakeShared<FJsonObject>();
+	Obj->SetBoolField(TEXT("success"), true);
+	Obj->SetStringField(TEXT("asset_path"), StateTree->GetPathName());
+	Obj->SetStringField(TEXT("state_path"), State ? MakeStatePath(State) : TEXT("<global>"));
+	Obj->SetStringField(TEXT("node_kind"), Info->Kind);
+	Obj->SetNumberField(TEXT("removed_count"), RemovedCount);
 	return SerializeJsonObj(Obj);
 }
 
