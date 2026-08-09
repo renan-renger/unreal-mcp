@@ -210,6 +210,36 @@ class TestBlueprintActions(MCPTestCase):
                       target_node=setter, target_pin="execute")
         self.assertSuccess(r)
 
+    def _pin_type(self, node_name, pin_name):
+        r = self.call("blueprint_actions", "ue_get_blueprint_graph_info",
+                      asset_path=self._bp_path, graph_name="EventGraph")
+        self.assertSuccess(r)
+        for node in r.get("nodes", []):
+            if node.get("node_name") != node_name:
+                continue
+            for pin in node.get("pins", []):
+                if pin.get("pin_name") == pin_name:
+                    return pin.get("type")
+        return None
+
+    def test_connect_resolves_a_wildcard_pin(self):
+        self._skip_if_no_bp()
+        # A wildcard only resolves inside PinConnectionListChanged, which MakeLinkTo
+        # does not call: without the notification Array_Add keeps NewItem as a wildcard
+        # and the graph fails to compile while looking correctly wired.
+        # ForEachLoop takes a wildcard array and derives Array Element from it;
+        # GetAllActorsOfClass hands back an Actor array to resolve it against.
+        loop = self._add_node(type="MacroInstance", macro_name="ForEachLoop")
+        source = self._add_node(type="CallFunction", function_name="GetAllActorsOfClass",
+                                target="GameplayStatics")
+        self.assertEqual(self._pin_type(loop, "Array Element"), "wildcard")
+        r = self.call("blueprint_actions", "ue_connect_blueprint_pins",
+                      asset_path=self._bp_path, graph_name="EventGraph",
+                      source_node=source, source_pin="OutActors",
+                      target_node=loop, target_pin="Array")
+        self.assertSuccess(r)
+        self.assertEqual(self._pin_type(loop, "Array Element"), "object")
+
     # ── build whole graph ───────────────────────────────────────────────────────
 
     def test_build_blueprint_graph(self):
