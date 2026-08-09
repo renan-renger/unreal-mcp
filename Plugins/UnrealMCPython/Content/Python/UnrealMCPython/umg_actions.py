@@ -12,11 +12,19 @@ VISIBILITY_MAP = {
     "self_hit_test_invisible": unreal.SlateVisibility.SELF_HIT_TEST_INVISIBLE,
 }
 
-SUPPORTED_WIDGET_TYPES = [
-    "CanvasPanel", "TextBlock", "Button", "Image",
-    "HorizontalBox", "VerticalBox", "Border", "Overlay",
-    "ScrollBox", "SizeBox", "CheckBox", "EditableText",
-    "EditableTextBox", "ProgressBar", "Slider",
+# Common types, listed for discoverability only - NOT an allowlist.
+#
+# This used to be enforced here, which rejected ScaleBox, RichTextBlock, WrapBox,
+# BackgroundBlur and every user widget (a project's own WBC_Button_C and friends)
+# before the request ever reached C++. UmgAddWidget now falls through to a real class
+# lookup and validates that the result is a concrete UWidget, so it is the authority
+# on what can be constructed; an unknown type still comes back as a clean
+# "Unknown widget type" error from there.
+COMMON_WIDGET_TYPES = [
+    "CanvasPanel", "TextBlock", "RichTextBlock", "Button", "Image",
+    "HorizontalBox", "VerticalBox", "Border", "Overlay", "WrapBox",
+    "ScrollBox", "SizeBox", "ScaleBox", "CheckBox", "EditableText",
+    "EditableTextBox", "ProgressBar", "Slider", "Spacer", "BackgroundBlur",
 ]
 
 
@@ -86,12 +94,6 @@ def ue_add_widget(asset_path: str = None, widget_type: str = None,
         return json.dumps({"success": False, "message": "Required parameter 'widget_type' is missing."})
     if widget_name is None:
         return json.dumps({"success": False, "message": "Required parameter 'widget_name' is missing."})
-
-    if widget_type not in SUPPORTED_WIDGET_TYPES:
-        return json.dumps({
-            "success": False,
-            "message": f"Unknown widget type '{widget_type}'. Supported: {SUPPORTED_WIDGET_TYPES}"
-        })
 
     try:
         widget_bp, err = _load_widget_blueprint(asset_path)
