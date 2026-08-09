@@ -88,9 +88,13 @@ to hard-freeze the machine. The suite saves constantly (278 packages in one run)
 hits this readily:
 
 ```bash
-UnrealEditor UnrealMCPSample.uproject -LogCmds="LogRendererCore off" \
+UnrealEditor UnrealMCPSample.uproject -RenderOffScreen -LogCmds="LogRendererCore off" \
   '-ini:EditorPerProjectUserSettings:[/Script/UnrealEd.EditorLoadingSavingSettings]:bAutoSaveEnable=False'
 ```
+
+(`-RenderOffScreen` is the third flag this launch needs — see below. Pass the `.uproject` as
+an **absolute** path: a relative one resolves against the engine directory and the editor
+dies with `Project file not found`.)
 
 **Disable autosave for the same launch.** E2E spawns actors into the open (untitled) level
 and never cleans them up, so autosave eventually fires on a map full of test actors while
@@ -122,13 +126,46 @@ and reads as a block of unrelated failures. A failure block that is *consecutive
 domain plus one heavy test is a stall signature, not N independent bugs — check whether
 the editor is still alive before diagnosing further.
 
-**After a `kill -9`, the relaunched editor logs a TCP server it does not have.**
+**Add `-RenderOffScreen` on a Wayland desktop, or the suite stalls for minutes per save.**
+Every `SavePackage` ticks its progress UI, and `FFeedbackContextEditor::ProgressReported`
+answers by ticking Slate, which pumps X11 — and each dispatched event costs a *synchronous*
+round-trip to the X server:
+
+```
+UPackage::Save → SaveHarvestedRealms → FSlowTask::TickProgress → RequestUpdateUI
+ → FFeedbackContextEditor::ProgressReported → TickSlate → FSlateApplication::TickPlatform
+  → SDL_PumpEvents → X11_DispatchEvent → X11_GetNetWMState → XGetWindowAttributes
+   → _XReply → xcb_wait_for_reply64        ← blocked here
+```
+
+Under XWayland those replies come back through the compositor and can block for minutes.
+Measured on the same asset in the same suite: `MCP_TestIKRig` saved in **6 ms** on a healthy
+run and **10m51s** on a stalled one; the suite saves ~278 packages, so a bad run never
+finishes. It is intermittent, so use the flag unconditionally rather than reacting to a
+stall. The signature is a frozen log plus one core at ~100% — not a crash; confirm with
+`eu-stack -p <pid> -1`. While stalled the editor **ignores SIGTERM** (the handler is caught
+but the game thread never leaves the X pump), so only `kill -9` ends it; with
+`-RenderOffScreen` SIGTERM lands in seconds.
+
+Two alternatives were tried and rejected. `-unattended` does nothing: `StartSlowTask` gates
+the window on `FSlateApplication::CanDisplayWindows()`, which is
+`Renderer.IsValid() && Renderer->AreShadersInitialized()` and never consults unattended —
+`FApp::IsUnattended()` is only read by `IsFallbackSplashScreenAllowed()`, the branch taken
+when windows *can't* be shown. `SDL_VIDEODRIVER=offscreen` boots but dies at frame 0 in
+`FVulkanLinuxPlatform::CreateSurface`, having given Vulkan no window to build a surface from.
+`-RenderOffScreen` does not suppress the slow-task window either — it just leaves no mapped
+window for X to generate events about, so Vulkan and the vision-capture tests are unaffected.
+
+**The relaunched editor can log a TCP server it does not have.**
 `LogMCPython: TCP server started at 127.0.0.1:12029.` is printed even when the bind failed,
 so the log reads clean while every client gets `ConnectionRefusedError` and `ss -ltn` shows
 no listener at all. Killing the editor hard leaves the socket held long enough to poison the
-next launch. Close the editor normally when it still responds; after a forced kill, wait for
-the port to clear before relaunching. Also note an empty `/dev/tcp` probe is not a readiness
-check — poll with a real `{"type": "python"}` request instead.
+next launch — but a forced kill is **not** a precondition: it has also happened after a clean
+SIGTERM shutdown with `ss -tan` showing no socket on 12029 in any state, so nothing was
+holding the port and the bind just failed silently. Close the editor normally when it still
+responds, let the port drain before relaunching, and restart again if the bridge never
+answers. Also note an empty `/dev/tcp` probe is not a readiness check — poll with a real
+`{"type": "python"}` request instead.
 
 **A leftover test asset fails the whole test class, silently.** `MCPTestCase.delete_asset`
 wraps the delete in `except Exception: pass`, so when a previous run died mid-suite and left
