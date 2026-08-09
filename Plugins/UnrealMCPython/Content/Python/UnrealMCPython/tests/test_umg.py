@@ -69,6 +69,92 @@ class TestUMGActions(MCPTestCase):
                       asset_path=self._wbp_path, widget_name="RemoveBtn")
         self.assertSuccess(r)
 
+    def test_add_widget_type_outside_the_common_list(self):
+        self._skip_if_no_wbp()
+        self.call("umg_actions", "ue_add_widget",
+                  asset_path=self._wbp_path,
+                  widget_type="CanvasPanel", widget_name="RootCanvas")
+        # ScaleBox and RichTextBlock are real UMG widgets that the old allowlist rejected
+        for wtype, wname in (("ScaleBox", "Scaler"), ("RichTextBlock", "RichText")):
+            r = self.call("umg_actions", "ue_add_widget",
+                          asset_path=self._wbp_path,
+                          widget_type=wtype, widget_name=wname, parent_name="RootCanvas")
+            self.assertSuccess(r, f"{wtype} should be constructible")
+
+    def test_add_widget_by_object_path(self):
+        self._skip_if_no_wbp()
+        r = self.call("umg_actions", "ue_add_widget",
+                      asset_path=self._wbp_path,
+                      widget_type="/Script/UMG.WrapBox", widget_name="PathRoot")
+        self.assertSuccess(r)
+
+    def test_add_widget_unknown_type_rejected(self):
+        self._skip_if_no_wbp()
+        r = self.call("umg_actions", "ue_add_widget",
+                      asset_path=self._wbp_path,
+                      widget_type="NotAWidget_XYZ", widget_name="Nope")
+        self.assertFalse(r.get("success"))
+
+    def test_add_widget_rejects_non_widget_class(self):
+        self._skip_if_no_wbp()
+        # Actor resolves as a class but is not a UWidget — constructing it would assert
+        r = self.call("umg_actions", "ue_add_widget",
+                      asset_path=self._wbp_path,
+                      widget_type="/Script/Engine.Actor", widget_name="NotAWidget")
+        self.assertFalse(r.get("success"))
+
+    def test_add_widget_rejects_abstract_widget_class(self):
+        self._skip_if_no_wbp()
+        # PanelWidget is UWidget-derived but abstract, so it cannot be instantiated
+        r = self.call("umg_actions", "ue_add_widget",
+                      asset_path=self._wbp_path,
+                      widget_type="PanelWidget", widget_name="AbstractPanel")
+        self.assertFalse(r.get("success"))
+
+    # ── variable GUID bookkeeping ─────────────────────────────────────────────
+
+    def _guid_names(self):
+        info = self.call("umg_actions", "ue_get_widget_blueprint_info",
+                         asset_path=self._wbp_path)
+        self.assertSuccess(info)
+        return info.get("variable_guid_names", [])
+
+    def test_add_widget_tracks_variable_guid(self):
+        self._skip_if_no_wbp()
+        self.call("umg_actions", "ue_add_widget",
+                  asset_path=self._wbp_path,
+                  widget_type="CanvasPanel", widget_name="RootCanvas")
+        self.assertIn("RootCanvas", self._guid_names())
+
+    def test_remove_widget_drops_subtree_variable_guids(self):
+        self._skip_if_no_wbp()
+        self.call("umg_actions", "ue_add_widget", asset_path=self._wbp_path,
+                  widget_type="CanvasPanel", widget_name="RootCanvas")
+        self.call("umg_actions", "ue_add_widget", asset_path=self._wbp_path,
+                  widget_type="VerticalBox", widget_name="Doomed", parent_name="RootCanvas")
+        self.call("umg_actions", "ue_add_widget", asset_path=self._wbp_path,
+                  widget_type="Button", widget_name="DoomedChild", parent_name="Doomed")
+
+        r = self.call("umg_actions", "ue_remove_widget",
+                      asset_path=self._wbp_path, widget_name="Doomed")
+        self.assertSuccess(r)
+
+        names = self._guid_names()
+        self.assertIn("RootCanvas", names)
+        # the removed panel AND its child must be gone, or every later compile complains
+        self.assertNotIn("Doomed", names)
+        self.assertNotIn("DoomedChild", names)
+
+    def test_replace_widget_drops_old_variable_guid(self):
+        self._skip_if_no_wbp()
+        self._root_canvas_with(("Button", "OldBtn"))
+        r = self.call("umg_actions", "ue_replace_widget", asset_path=self._wbp_path,
+                      widget_name="OldBtn", new_type="Image", new_name="NewImg")
+        self.assertSuccess(r)
+        names = self._guid_names()
+        self.assertIn("NewImg", names)
+        self.assertNotIn("OldBtn", names)
+
     # ── properties ────────────────────────────────────────────────────────────
 
     def test_set_widget_properties(self):

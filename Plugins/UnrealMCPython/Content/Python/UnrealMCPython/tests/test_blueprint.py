@@ -136,6 +136,68 @@ class TestBlueprintActions(MCPTestCase):
                       node_name=node)
         self.assertSuccess(r)
 
+    # ── event dispatchers ───────────────────────────────────────────────────────
+
+    def _add_node_raw(self, **node_json):
+        return self.call("blueprint_actions", "ue_add_blueprint_node",
+                         asset_path=self._bp_path, graph_name="EventGraph",
+                         node_json=node_json)
+
+    def test_add_delegate_node_on_self(self):
+        self._skip_if_no_bp()
+        # OnDestroyed comes from Actor, the parent class, so the Blueprint's own class owns it
+        self._add_node(type="AddDelegate", delegate_name="OnDestroyed")
+        r = self.call("blueprint_actions", "ue_compile_blueprint", asset_path=self._bp_path)
+        self.assertSuccess(r)
+
+    def test_add_delegate_node_on_external_class(self):
+        self._skip_if_no_bp()
+        r = self._add_node_raw(type="AddDelegate", delegate_name="OnClicked",
+                               delegate_class="/Script/UMG.Button")
+        self.assertSuccess(r)
+
+    def test_call_delegate_node(self):
+        self._skip_if_no_bp()
+        r = self._add_node_raw(type="CallDelegate", delegate_name="OnDestroyed")
+        self.assertSuccess(r)
+
+    def test_delegate_node_unknown_name_rejected(self):
+        self._skip_if_no_bp()
+        r = self._add_node_raw(type="AddDelegate", delegate_name="OnNope_XYZ")
+        self.assertFalse(r.get("success"))
+
+    def test_delegate_node_unknown_class_rejected(self):
+        self._skip_if_no_bp()
+        r = self._add_node_raw(type="AddDelegate", delegate_name="OnClicked",
+                               delegate_class="/Script/UMG.NotAClass_XYZ")
+        self.assertFalse(r.get("success"))
+
+    def test_delegate_node_missing_name(self):
+        self._skip_if_no_bp()
+        r = self._add_node_raw(type="AddDelegate")
+        self.assertFalse(r.get("success"))
+
+    def test_custom_event_takes_delegate_signature(self):
+        self._skip_if_no_bp()
+        # Without a signature the handler has no parameters and silently drops what the
+        # dispatcher passes; OnTakeAnyDamage carries Damage among others.
+        r = self._add_node_raw(type="CustomEvent", event_name="HandleDamage",
+                               delegate_signature="OnTakeAnyDamage")
+        self.assertSuccess(r)
+        pin_names = [p.get("pin_name") for p in r.get("pins", [])]
+        self.assertIn("Damage", pin_names)
+
+    def test_custom_event_unknown_delegate_signature_rejected(self):
+        self._skip_if_no_bp()
+        r = self._add_node_raw(type="CustomEvent", event_name="HandleNothing",
+                               delegate_signature="OnNope_XYZ")
+        self.assertFalse(r.get("success"))
+
+    def test_custom_event_without_signature_still_works(self):
+        self._skip_if_no_bp()
+        r = self._add_node_raw(type="CustomEvent", event_name="PlainEvent")
+        self.assertSuccess(r)
+
     # ── connect pins ────────────────────────────────────────────────────────────
 
     def test_connect_blueprint_pins(self):

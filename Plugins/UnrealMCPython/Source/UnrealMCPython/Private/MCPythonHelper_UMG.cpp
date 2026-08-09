@@ -6,6 +6,7 @@
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "WidgetBlueprint.h"
+#include "UObject/Package.h"          // GetTransientPackage, for banishing removed widgets
 #include "Blueprint/WidgetTree.h"
 #include "Components/Widget.h"
 #include "Components/PanelWidget.h"
@@ -101,9 +102,104 @@ namespace
             {TEXT("ProgressBar"),      TEXT("/Script/UMG.ProgressBar")},
             {TEXT("Slider"),           TEXT("/Script/UMG.Slider")},
         };
-        const FString* Path = TypeMap.Find(TypeName);
-        if (!Path) return nullptr;
-        return LoadObject<UClass>(nullptr, **Path);
+        if (const FString* Path = TypeMap.Find(TypeName))
+        {
+            return LoadObject<UClass>(nullptr, **Path);
+        }
+
+        // The map above is a convenience list, not the set of widgets UMG can construct - it omits
+        // ScaleBox, RichTextBlock, WrapBox, BackgroundBlur and every user widget (a project's own
+        // WBC_Button_C and friends). Building a screen that matches the rest of a project's UI is
+        // impossible without those, so fall through to a real class lookup.
+        //
+        // Order matters: an explicit object path first (so a caller can name a Blueprint widget
+        // exactly), then the UMG script package, then a global search for anything else already
+        // loaded - which is how user widgets resolve, since their generated class is UWidget-derived
+        // but lives under /Game.
+        UClass* Found = nullptr;
+
+        if (TypeName.Contains(TEXT("/")))
+        {
+            // "/Game/Blueprints/Widgets/WBC_Button.WBC_Button_C" or a /Script/ path.
+            Found = LoadObject<UClass>(nullptr, *TypeName);
+        }
+
+        if (!Found)
+        {
+            Found = LoadObject<UClass>(nullptr, *FString::Printf(TEXT("/Script/UMG.%s"), *TypeName));
+        }
+
+        if (!Found)
+        {
+            // Bare name, e.g. "WBC_Button_C". NativeFirst keeps an engine class winning over a
+            // same-named asset, matching how the explicit map behaved.
+            Found = FindFirstObject<UClass>(*TypeName, EFindFirstObjectOptions::NativeFirst);
+        }
+
+        // Guard the fallback: ConstructWidget<UWidget> would assert on a non-widget class, and an
+        // abstract one cannot be instantiated at all. Returning null yields the caller's normal
+        // "Unknown widget type" error instead of taking the editor down.
+        if (Found && (!Found->IsChildOf(UWidget::StaticClass()) || Found->HasAnyClassFlags(CLASS_Abstract)))
+        {
+            Found = nullptr;
+        }
+
+        return Found;
+    }
+
+    // Move a widget and everything under it out of the widget blueprint, and report the names freed.
+    //
+    // Detaching is not enough. UBaseWidgetBlueprint::ForEachSourceWidgetImpl walks
+    // ForEachObjectWithOuter(WidgetTree), not the parent/child links, so a widget stays a *source
+    // widget* for as long as it is outered to the tree - unparented or not. The next compile therefore
+    // finds it and re-adds any GUID we dropped, and the entry only turns stale after the asset is
+    // saved and reloaded without the orphan, at which point every later compile reports
+    //     Variable [X] was deleted but still has a GUID referenced by WidgetBlueprint [Y]
+    // Re-outering to the transient package is what the widget editor itself does in
+    // FWidgetBlueprintEditorUtils::DeleteWidgets, and it frees the name for a same-name replacement.
+    //
+    // Each descendant is outered to the tree in its own right, so the whole subtree has to be walked -
+    // renaming the parent moves only the parent. Names are collected before the first rename, and
+    // ForWidgetAndChildren visits descendants only, hence the explicit entry for the widget itself.
+    static void BanishWidgetSubtree(UWidget* Widget, TArray<FName>& OutNames)
+    {
+        if (!Widget) return;
+
+        TArray<UWidget*> Doomed;
+        Doomed.Add(Widget);
+        UWidgetTree::ForWidgetAndChildren(Widget, [&Doomed](UWidget* Descendant)
+        {
+            Doomed.Add(Descendant);
+        });
+
+        for (UWidget* Banished : Doomed)
+        {
+            OutNames.Add(Banished->GetFName());
+            Banished->SetFlags(RF_Transactional);
+            Banished->Modify();
+            Banished->Rename(nullptr, GetTransientPackage());
+        }
+    }
+
+    // Drop the variable GUID of every banished name no live widget answers to any more.
+    //
+    // The survivor check is not redundant: a replacement that reuses the outgoing widget's name keeps
+    // the GUID, so anything referencing that variable externally still resolves. Same rule the widget
+    // editor applies when a delete comes from a replace.
+    static void PruneOrphanedVariableGuids(UWidgetBlueprint* WB, const TArray<FName>& Names)
+    {
+        if (!WB) return;
+
+        const TArray<UWidget*> Live = WB->GetAllSourceWidgets();
+        for (const FName& Name : Names)
+        {
+            const bool bStillLive = Live.ContainsByPredicate(
+                [&Name](const UWidget* W) { return W && W->GetFName() == Name; });
+            if (!bStillLive)
+            {
+                WB->OnVariableRemoved(Name);
+            }
+        }
     }
 
     static FString UmgErrorJson(const FString& Msg)
@@ -143,6 +239,14 @@ FString UMCPythonHelper::UmgGetWidgetInfo(UBlueprint* WidgetBP)
 
     Root->SetArrayField(TEXT("widgets"), WidgetArr);
     Root->SetNumberField(TEXT("widget_count"), WidgetArr.Num());
+
+    // Names the blueprint tracks a variable GUID for. Not script-visible on UWidgetBlueprint, and
+    // the only way to see whether add/remove kept the map in step with the tree - a name here with
+    // no matching widget is what makes the widget compiler complain on every later compile.
+    TArray<TSharedPtr<FJsonValue>> GuidNames;
+    for (const TPair<FName, FGuid>& Entry : WB->WidgetVariableNameToGuidMap)
+        GuidNames.Add(MakeShared<FJsonValueString>(Entry.Key.ToString()));
+    Root->SetArrayField(TEXT("variable_guid_names"), GuidNames);
 
     return SerializeJsonObj(Root);
 }
@@ -248,6 +352,10 @@ FString UMCPythonHelper::UmgRemoveWidget(UBlueprint* WidgetBP, const FString& Wi
     {
         return UmgErrorJson(FString::Printf(TEXT("Cannot remove '%s': not attached to a panel or root."), *WidgetName));
     }
+
+    TArray<FName> Banished;
+    BanishWidgetSubtree(Widget, Banished);
+    PruneOrphanedVariableGuids(WB, Banished);
 
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WB);
 
@@ -474,27 +582,29 @@ FString UMCPythonHelper::UmgWrapWidget(UBlueprint* WidgetBP, const FString& Widg
     if (!WrapperClass->IsChildOf(UPanelWidget::StaticClass()))
         return UmgErrorJson(FString::Printf(TEXT("Wrapper type '%s' is not a panel widget."), *WrapperType));
 
+    // Same as UmgReplaceWidget: settle the destination before constructing, so the error path
+    // cannot leave a registered-but-unattached wrapper behind.
+    UPanelWidget* OldParent = Cast<UPanelWidget>(Widget->GetParent());
+    const bool bWrappingRoot = (!OldParent && WT->RootWidget == Widget);
+    if (!OldParent && !bWrappingRoot)
+        return UmgErrorJson(FString::Printf(TEXT("Widget '%s' is not attached to a panel or root."), *WidgetName));
+
     WT->Modify();
     UPanelWidget* Wrapper = WT->ConstructWidget<UPanelWidget>(WrapperClass, FName(*WrapperName));
     if (!Wrapper) return UmgErrorJson(FString::Printf(TEXT("Failed to construct wrapper '%s'."), *WrapperName));
     Wrapper->bIsVariable = true;
     WB->OnVariableAdded(Wrapper->GetFName());
 
-    if (UPanelWidget* OldParent = Cast<UPanelWidget>(Widget->GetParent()))
+    if (OldParent)
     {
         const int32 Index = OldParent->GetChildIndex(Widget);
         OldParent->ReplaceChildAt(Index, Wrapper);   // wrapper takes the widget's slot
-        Wrapper->AddChild(Widget);                    // widget moves inside the wrapper
-    }
-    else if (WT->RootWidget == Widget)
-    {
-        WT->RootWidget = Wrapper;
-        Wrapper->AddChild(Widget);
     }
     else
     {
-        return UmgErrorJson(FString::Printf(TEXT("Widget '%s' is not attached to a panel or root."), *WidgetName));
+        WT->RootWidget = Wrapper;
     }
+    Wrapper->AddChild(Widget);                        // widget moves inside the wrapper
 
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WB);
     TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
@@ -517,24 +627,43 @@ FString UMCPythonHelper::UmgReplaceWidget(UBlueprint* WidgetBP, const FString& W
     UClass* NewClass = FindUMGWidgetClass(NewType);
     if (!NewClass) return UmgErrorJson(FString::Printf(TEXT("Unknown widget type '%s'."), *NewType));
 
+    // Decide where the replacement goes before constructing anything, so the unattached-widget
+    // error cannot leave a half-registered widget behind.
+    UPanelWidget* OldParent = Cast<UPanelWidget>(Widget->GetParent());
+    const bool bReplacingRoot = (!OldParent && WT->RootWidget == Widget);
+    if (!OldParent && !bReplacingRoot)
+        return UmgErrorJson(FString::Printf(TEXT("Widget '%s' is not attached to a panel or root."), *WidgetName));
+
+    // The slot index has to be read while the outgoing widget is still a child; banishing it below
+    // leaves the pointer in place, so the index stays valid.
+    const int32 Index = OldParent ? OldParent->GetChildIndex(Widget) : INDEX_NONE;
+
     WT->Modify();
+
+    // Banish before constructing: it frees the name, so NewName == WidgetName yields the name asked
+    // for instead of a "<name>_1" the caller never sees coming.
+    TArray<FName> Banished;
+    BanishWidgetSubtree(Widget, Banished);
+
     UWidget* NewWidget = WT->ConstructWidget<UWidget>(NewClass, FName(*NewName));
     if (!NewWidget) return UmgErrorJson(FString::Printf(TEXT("Failed to construct widget '%s'."), *NewName));
     NewWidget->bIsVariable = true;
-    WB->OnVariableAdded(NewWidget->GetFName());
 
-    if (UPanelWidget* OldParent = Cast<UPanelWidget>(Widget->GetParent()))
+    if (OldParent)
     {
-        const int32 Index = OldParent->GetChildIndex(Widget);
         OldParent->ReplaceChildAt(Index, NewWidget);   // old widget (and its subtree) is discarded
-    }
-    else if (WT->RootWidget == Widget)
-    {
-        WT->RootWidget = NewWidget;
     }
     else
     {
-        return UmgErrorJson(FString::Printf(TEXT("Widget '%s' is not attached to a panel or root."), *WidgetName));
+        WT->RootWidget = NewWidget;
+    }
+
+    // Prune first, then register: a same-name replacement is already live by now, so its name survives
+    // the prune and keeps the old GUID - and OnVariableAdded ensures on a name that still has one.
+    PruneOrphanedVariableGuids(WB, Banished);
+    if (!WB->WidgetVariableNameToGuidMap.Contains(NewWidget->GetFName()))
+    {
+        WB->OnVariableAdded(NewWidget->GetFName());
     }
 
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WB);
