@@ -51,6 +51,8 @@
 #include "K2Node_DynamicCast.h"
 #include "K2Node_InputKey.h"
 #include "K2Node_SpawnActorFromClass.h"
+#include "K2Node_AddDelegate.h"
+#include "K2Node_CallDelegate.h"
 #include "EdGraphSchema_K2.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -342,6 +344,60 @@ FString UMCPythonHelper::ListBlueprintVariables(UBlueprint* Blueprint)
 
 // ─── Blueprint Node Creation Helpers ─────────────────────────────────────────
 
+// Resolve a multicast delegate (event dispatcher) named in node JSON.
+//
+// An empty ClassPath means the Blueprint's own class, which covers its own dispatchers; otherwise
+// the class is looked up by object path first, then by bare name. Resolving against the property
+// rather than trusting the name matters: a wrong name would otherwise produce a node that looks
+// fine in the graph and fails at compile with no useful message.
+static FMulticastDelegateProperty* ResolveDelegateProperty(
+    const FString& DelegateName, const FString& ClassPath, UBlueprint* Blueprint,
+    UClass*& OutOwnerClass, FString& OutError)
+{
+    OutOwnerClass = nullptr;
+
+    if (ClassPath.IsEmpty())
+    {
+        OutOwnerClass = Blueprint ? Blueprint->GeneratedClass : nullptr;
+        if (!OutOwnerClass)
+        {
+            OutError = TEXT("No delegate class given and the Blueprint has no generated class yet; compile it first.");
+            return nullptr;
+        }
+    }
+    else
+    {
+        OutOwnerClass = LoadClass<UObject>(nullptr, *ClassPath);
+        if (!OutOwnerClass)
+        {
+            OutOwnerClass = FindFirstObject<UClass>(*ClassPath, EFindFirstObjectOptions::NativeFirst);
+        }
+        if (!OutOwnerClass)
+        {
+            OutError = FString::Printf(TEXT("Delegate class '%s' not found."), *ClassPath);
+            return nullptr;
+        }
+    }
+
+    FMulticastDelegateProperty* Prop =
+        FindFProperty<FMulticastDelegateProperty>(OutOwnerClass, FName(*DelegateName));
+
+    // A dispatcher added since the last compile only exists on the skeleton class.
+    if (!Prop && Blueprint && OutOwnerClass == Blueprint->GeneratedClass && Blueprint->SkeletonGeneratedClass)
+    {
+        Prop = FindFProperty<FMulticastDelegateProperty>(Blueprint->SkeletonGeneratedClass, FName(*DelegateName));
+    }
+
+    if (!Prop)
+    {
+        OutError = FString::Printf(TEXT("'%s' is not a multicast delegate on '%s'."),
+            *DelegateName, *OutOwnerClass->GetName());
+        return nullptr;
+    }
+
+    return Prop;
+}
+
 static UEdGraphNode* CreateBPNodeFromJson(UEdGraph* Graph, UBlueprint* Blueprint, const TSharedPtr<FJsonObject>& NodeJson, FString& OutError)
 {
     FString NodeType;
@@ -439,14 +495,51 @@ static UEdGraphNode* CreateBPNodeFromJson(UEdGraph* Graph, UBlueprint* Blueprint
             return nullptr;
         }
 
+        // Optional: give the event a dispatcher's parameters.
+        //
+        // Needed to make AddDelegate usable. A custom event only copies a delegate's signature
+        // inside ReconstructNode, which merely connecting its OutputDelegate pin does not trigger -
+        // so a hand-built binding produced an event with no parameters, silently dropping whatever
+        // the dispatcher passed.
+        //
+        // 'delegate_signature' names the dispatcher property, 'delegate_signature_class' the class
+        // that owns it - same pair AddDelegate takes, so both ends of a binding are described alike.
+        //
+        // Resolved before the node exists: bailing out with a live FGraphNodeCreator asserts
+        // ("Created node was not finalized"), which is a crash, not an error message.
+        UFunction* SignatureFunction = nullptr;
+        FString SigName;
+        if (NodeJson->TryGetStringField(TEXT("delegate_signature"), SigName) && !SigName.IsEmpty())
+        {
+            FString SigClass;
+            NodeJson->TryGetStringField(TEXT("delegate_signature_class"), SigClass);
+
+            UClass* SigOwner = nullptr;
+            FMulticastDelegateProperty* SigProp =
+                ResolveDelegateProperty(SigName, SigClass, Blueprint, SigOwner, OutError);
+            if (!SigProp)
+            {
+                OutError = FString::Printf(TEXT("CustomEvent: %s"), *OutError);
+                return nullptr;
+            }
+            if (!SigProp->SignatureFunction)
+            {
+                OutError = FString::Printf(TEXT("CustomEvent: delegate '%s' has no signature function."), *SigName);
+                return nullptr;
+            }
+
+            SignatureFunction = SigProp->SignatureFunction;
+        }
+
         FGraphNodeCreator<UK2Node_CustomEvent> Creator(*Graph);
         UK2Node_CustomEvent* CustomNode = Creator.CreateNode(false);
-        if (!CustomNode)
-        {
-            OutError = FString::Printf(TEXT("Failed to create CustomEvent '%s'."), *EventName);
-            return nullptr;
-        }
         CustomNode->CustomFunctionName = FName(*EventName);
+
+        if (SignatureFunction)
+        {
+            CustomNode->SetDelegateSignature(SignatureFunction);
+        }
+
         CustomNode->NodePosX = PosX;
         CustomNode->NodePosY = PosY;
         Creator.Finalize();
@@ -487,6 +580,56 @@ static UEdGraphNode* CreateBPNodeFromJson(UEdGraph* Graph, UBlueprint* Blueprint
         BranchNode->NodePosY = PosY;
         Creator.Finalize();
         NewNode = BranchNode;
+    }
+    else if (NodeType == TEXT("AddDelegate") || NodeType == TEXT("CallDelegate"))
+    {
+        // Binding an event dispatcher was the last thing the bridge could not author, which meant
+        // anything driven by a dispatcher on a runtime-created widget always needed a human to drag
+        // one link.
+        //
+        // 'delegate_name' is the dispatcher property; 'delegate_class' is the class that owns it
+        // (defaults to this Blueprint, which covers self-dispatchers).
+        FString DelegateName;
+        if (!NodeJson->TryGetStringField(TEXT("delegate_name"), DelegateName))
+        {
+            OutError = FString::Printf(TEXT("%s node missing 'delegate_name'."), *NodeType);
+            return nullptr;
+        }
+
+        FString DelegateClass;
+        NodeJson->TryGetStringField(TEXT("delegate_class"), DelegateClass);
+
+        UClass* OwnerClass = nullptr;
+        FMulticastDelegateProperty* DelegateProp =
+            ResolveDelegateProperty(DelegateName, DelegateClass, Blueprint, OwnerClass, OutError);
+        if (!DelegateProp)
+        {
+            OutError = FString::Printf(TEXT("%s: %s"), *NodeType, *OutError);
+            return nullptr;
+        }
+
+        const bool bSelfContext = (Blueprint && OwnerClass == Blueprint->GeneratedClass);
+
+        if (NodeType == TEXT("AddDelegate"))
+        {
+            FGraphNodeCreator<UK2Node_AddDelegate> Creator(*Graph);
+            UK2Node_AddDelegate* DelNode = Creator.CreateNode(false);
+            DelNode->SetFromProperty(DelegateProp, bSelfContext, OwnerClass);
+            DelNode->NodePosX = PosX;
+            DelNode->NodePosY = PosY;
+            Creator.Finalize();
+            NewNode = DelNode;
+        }
+        else
+        {
+            FGraphNodeCreator<UK2Node_CallDelegate> Creator(*Graph);
+            UK2Node_CallDelegate* DelNode = Creator.CreateNode(false);
+            DelNode->SetFromProperty(DelegateProp, bSelfContext, OwnerClass);
+            DelNode->NodePosX = PosX;
+            DelNode->NodePosY = PosY;
+            Creator.Finalize();
+            NewNode = DelNode;
+        }
     }
     else if (NodeType == TEXT("Sequence"))
     {
@@ -650,7 +793,7 @@ static UEdGraphNode* CreateBPNodeFromJson(UEdGraph* Graph, UBlueprint* Blueprint
     }
     else
     {
-        OutError = FString::Printf(TEXT("Unknown node type '%s'. Supported: CallFunction, Event, CustomEvent, CastTo, Branch, Sequence, VariableGet, VariableSet, MacroInstance, InputKey, SpawnActor."), *NodeType);
+        OutError = FString::Printf(TEXT("Unknown node type '%s'. Supported: CallFunction, Event, CustomEvent, CastTo, Branch, Sequence, VariableGet, VariableSet, MacroInstance, InputKey, SpawnActor, AddDelegate, CallDelegate."), *NodeType);
         return nullptr;
     }
 
