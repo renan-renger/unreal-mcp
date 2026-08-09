@@ -819,6 +819,29 @@ static UEdGraphNode* CreateBPNodeFromJson(UEdGraph* Graph, UBlueprint* Blueprint
     return NewNode;
 }
 
+// MakeLinkTo only edits the pin arrays; it never tells the owning nodes. Nodes that
+// derive their own state from what is connected - a wildcard resolving to the linked
+// type, an exec pin gaining an entry, CallFunction refreshing defaults - only do that
+// work inside PinConnectionListChanged, so a link made without this notification looks
+// correct in the graph and fails at compile with the wildcard still unresolved.
+static void NotifyPinsConnectionChanged(UEdGraphPin* SourcePin, UEdGraphPin* TargetPin)
+{
+    if (SourcePin)
+    {
+        if (UEdGraphNode* Node = SourcePin->GetOwningNodeUnchecked())
+        {
+            Node->PinConnectionListChanged(SourcePin);
+        }
+    }
+    if (TargetPin)
+    {
+        if (UEdGraphNode* Node = TargetPin->GetOwningNodeUnchecked())
+        {
+            Node->PinConnectionListChanged(TargetPin);
+        }
+    }
+}
+
 // ─── AddBlueprintNode UFUNCTION ──────────────────────────────────────────────
 
 FString UMCPythonHelper::AddBlueprintNode(UBlueprint* Blueprint, const FString& GraphName, const FString& NodeJson)
@@ -925,6 +948,7 @@ FString UMCPythonHelper::ConnectBlueprintPins(UBlueprint* Blueprint, const FStri
     }
 
     SourcePin->MakeLinkTo(TargetPin);
+    NotifyPinsConnectionChanged(SourcePin, TargetPin);
 
     FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
     return MakeJsonSuccess(FString::Printf(TEXT("Connected %s.%s -> %s.%s"),
@@ -1139,6 +1163,7 @@ FString UMCPythonHelper::BuildBlueprintGraph(UBlueprint* Blueprint, const FStrin
         }
 
         SourcePin->MakeLinkTo(TargetPin);
+        NotifyPinsConnectionChanged(SourcePin, TargetPin);
     }
 
     // Layout nodes
