@@ -35,6 +35,207 @@ class TestBlueprintActions(MCPTestCase):
         self.assertSuccess(r)
         self.assertIn("nodes", r)
 
+    # ── graph enumeration & path resolution ───────────────────────────────────
+    #
+    # These cover the graph forest walk: a Blueprint's graphs are a tree, not a
+    # flat list, and collapsed graphs (K2Node_Composite) used to be unreachable
+    # by every action that takes graph_name.
+    #
+    # A collapsed graph cannot be authored from Python (K2Node_Composite::BoundGraph
+    # is not editor-exposed and there is no collapse API), so the nested cases below
+    # build the fixture reflectively and skip when the engine refuses. The real
+    # nesting check is a manual one against an asset that already has a collapsed
+    # graph — see test_nested_graph_resolution's docstring.
+
+    def _graphs(self):
+        r = self.call("blueprint_actions", "ue_list_blueprint_graphs",
+                      asset_path=self._bp_path)
+        self.assertSuccess(r)
+        return r
+
+    def test_list_blueprint_graphs(self):
+        self._skip_if_no_bp()
+        r = self._graphs()
+        self.assertEqual(r["graph_count"], len(r["graphs"]))
+        self.assertGreater(r["graph_count"], 0, "a Blueprint always has at least one graph")
+
+        for g in r["graphs"]:
+            for key in ("path", "name", "root_kind", "depth", "node_count", "name_is_unique"):
+                self.assertIn(key, g, f"missing '{key}' in {g}")
+            # A root graph's path is just its name; a nested one is parent/child.
+            if g["depth"] == 0:
+                self.assertEqual(g["path"], g["name"])
+            else:
+                self.assertTrue(g["path"].endswith("/" + g["name"]))
+            self.assertEqual(g["path"].count("/"), g["depth"])
+
+    def test_list_blueprint_graphs_includes_event_graph(self):
+        self._skip_if_no_bp()
+        r = self._graphs()
+        ubergraphs = [g for g in r["graphs"] if g["root_kind"] == "Ubergraph"]
+        self.assertTrue(ubergraphs, f"expected at least one Ubergraph: {r['graphs']}")
+
+    def test_list_blueprint_graphs_missing_param(self):
+        r = self.call("blueprint_actions", "ue_list_blueprint_graphs")
+        self.assertFalse(r.get("success"))
+
+    def test_list_blueprint_graphs_unknown_asset(self):
+        r = self.call("blueprint_actions", "ue_list_blueprint_graphs",
+                      asset_path=f"{TEST_ROOT}/MCP_NoSuchBlueprint")
+        self.assertFalse(r.get("success"))
+
+    def test_every_listed_graph_resolves_by_full_path(self):
+        """Whatever list_blueprint_graphs advertises must be addressable as-is."""
+        self._skip_if_no_bp()
+        for g in self._graphs()["graphs"]:
+            r = self.call("blueprint_actions", "ue_get_blueprint_graph_info",
+                          asset_path=self._bp_path, graph_name=g["path"])
+            self.assertSuccess(r, f"full path '{g['path']}' did not resolve: {r}")
+
+    def test_unique_graph_resolves_by_bare_name(self):
+        """A leaf name that occurs once is addressable without any path."""
+        self._skip_if_no_bp()
+        unique = [g for g in self._graphs()["graphs"] if g["name_is_unique"]]
+        if not unique:
+            self.skipTest("no uniquely-named graph in this Blueprint")
+        for g in unique:
+            r = self.call("blueprint_actions", "ue_get_blueprint_graph_info",
+                          asset_path=self._bp_path, graph_name=g["name"])
+            self.assertSuccess(r, f"bare name '{g['name']}' did not resolve: {r}")
+
+    def test_function_graph_resolves(self):
+        """Regression: function graphs stay reachable after the resolver rewrite."""
+        self._skip_if_no_bp()
+        funcs = [g for g in self._graphs()["graphs"] if g["root_kind"] == "Function"]
+        if not funcs:
+            self.skipTest("Blueprint has no function graph")
+        r = self.call("blueprint_actions", "ue_get_blueprint_graph_info",
+                      asset_path=self._bp_path, graph_name=funcs[0]["path"])
+        self.assertSuccess(r)
+
+    def test_unknown_graph_error_lists_available_graphs(self):
+        """The failure must be actionable, not a dead end.
+
+        The old message was just "Graph 'X' not found in Blueprint." with no way to
+        discover real names — the gap that made collapsed graphs undebuggable.
+        """
+        self._skip_if_no_bp()
+        r = self.call("blueprint_actions", "ue_get_blueprint_graph_info",
+                      asset_path=self._bp_path, graph_name="NoSuchGraph_XYZ")
+        self.assertFalse(r.get("success"))
+        msg = r.get("message", "")
+        self.assertIn("Available graphs", msg, f"error is not actionable: {msg}")
+        some_real_graph = self._graphs()["graphs"][0]["name"]
+        self.assertIn(some_real_graph, msg)
+
+    def test_empty_graph_name_is_rejected(self):
+        self._skip_if_no_bp()
+        r = self.call("blueprint_actions", "ue_get_blueprint_graph_info",
+                      asset_path=self._bp_path, graph_name="   ")
+        self.assertFalse(r.get("success"))
+
+    def test_path_separators_are_normalised(self):
+        """Stray/duplicated slashes must not change resolution."""
+        self._skip_if_no_bp()
+        target = self._graphs()["graphs"][0]["path"]
+        for variant in (f"/{target}", f"{target}/", f"//{target}//"):
+            r = self.call("blueprint_actions", "ue_get_blueprint_graph_info",
+                          asset_path=self._bp_path, graph_name=variant)
+            self.assertSuccess(r, f"variant '{variant}' did not resolve: {r}")
+
+    # ── nested (collapsed) graphs ─────────────────────────────────────────────
+
+    def _try_make_collapsed_graph(self, name):
+        """Build a minimal K2Node_Composite + BoundGraph, or return None.
+
+        Only BoundGraph needs to be set: the resolver finds children through the
+        base-class virtual UEdGraphNode::GetSubGraphs(), which K2Node_Composite
+        overrides to return exactly that graph. Tunnel nodes and a compilable
+        interior are irrelevant to *resolution*, so the fixture stays minimal.
+        """
+        try:
+            bp = unreal.EditorAssetLibrary.load_asset(self._bp_path)
+            event_graph = bp.get_editor_property("uber_graph_pages")[0]
+            bound = unreal.new_object(unreal.EdGraph, outer=bp, name=name)
+            composite = unreal.new_object(unreal.K2Node_Composite, outer=event_graph)
+            composite.set_editor_property("bound_graph", bound)
+            event_graph.get_editor_property("nodes").append(composite)
+            return bound
+        except Exception:
+            return None
+
+    def test_nested_graph_resolution(self):
+        """Collapsed graphs resolve by bare name and by path.
+
+        Skips when the fixture cannot be built from Python. The authoritative
+        manual check, against a Blueprint that really has one:
+            blueprint list_blueprint_graphs {"asset_path": "<BP>"}
+            blueprint get_blueprint_graph_info {"asset_path": "<BP>",
+                                                "graph_name": "EventGraph/<Collapsed>"}
+        """
+        self._skip_if_no_bp()
+        before = self._graphs()["graph_count"]
+        if self._try_make_collapsed_graph("MCP_Collapsed") is None:
+            self.skipTest("cannot author a K2Node_Composite from Python")
+
+        after = self._graphs()
+        self.assertEqual(after["graph_count"], before + 1,
+                         "collapsed graph was not enumerated")
+
+        nested = [g for g in after["graphs"] if g["name"] == "MCP_Collapsed"]
+        self.assertEqual(len(nested), 1)
+        self.assertEqual(nested[0]["depth"], 1)
+        self.assertIn("/", nested[0]["path"])
+        self.assertEqual(nested[0]["owning_node_class"], "K2Node_Composite")
+
+        # Reachable by bare name and by full path — the whole point of the change.
+        for graph_name in ("MCP_Collapsed", nested[0]["path"]):
+            r = self.call("blueprint_actions", "ue_get_blueprint_graph_info",
+                          asset_path=self._bp_path, graph_name=graph_name)
+            self.assertSuccess(r, f"'{graph_name}' did not resolve: {r}")
+
+    def test_ambiguous_bare_name_is_an_error(self):
+        """Two graphs sharing a leaf name must never silently pick one."""
+        self._skip_if_no_bp()
+        if self._try_make_collapsed_graph("MCP_Dup") is None:
+            self.skipTest("cannot author a K2Node_Composite from Python")
+        if self._try_make_collapsed_graph("MCP_Dup") is None:
+            self.skipTest("cannot author a second K2Node_Composite from Python")
+
+        dups = [g for g in self._graphs()["graphs"] if g["name"].startswith("MCP_Dup")]
+        if len({g["name"] for g in dups}) != 1 or len(dups) < 2:
+            self.skipTest("engine renamed the duplicate; cannot force a collision")
+
+        r = self.call("blueprint_actions", "ue_get_blueprint_graph_info",
+                      asset_path=self._bp_path, graph_name="MCP_Dup")
+        self.assertFalse(r.get("success"), "ambiguous name must not resolve")
+        self.assertIn("ambiguous", r.get("message", "").lower())
+        # The error has to name the candidates, or it is not actionable.
+        for g in dups:
+            self.assertIn(g["path"], r["message"])
+
+    def test_edit_inside_collapsed_graph(self):
+        """Edit actions — not just reads — must reach a collapsed graph."""
+        self._skip_if_no_bp()
+        if self._try_make_collapsed_graph("MCP_Editable") is None:
+            self.skipTest("cannot author a K2Node_Composite from Python")
+
+        r = self.call("blueprint_actions", "ue_add_blueprint_node",
+                      asset_path=self._bp_path, graph_name="MCP_Editable",
+                      node_json={"type": "CallFunction", "function_name": "K2_GetActorLocation"})
+        self.assertSuccess(r, f"could not add a node inside the collapsed graph: {r}")
+        added = r["node_name"]
+
+        info = self.call("blueprint_actions", "ue_get_blueprint_graph_info",
+                         asset_path=self._bp_path, graph_name="MCP_Editable")
+        self.assertSuccess(info)
+        self.assertIn(added, [n["node_name"] for n in info["nodes"]],
+                      "node was added to the wrong graph")
+
+        r = self.call("blueprint_actions", "ue_remove_blueprint_node",
+                      asset_path=self._bp_path, graph_name="MCP_Editable", node_name=added)
+        self.assertSuccess(r)
+
     def test_list_callable_functions(self):
         self._skip_if_no_bp()
         r = self.call("blueprint_actions", "ue_list_callable_functions",

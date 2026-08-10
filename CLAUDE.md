@@ -66,11 +66,20 @@ import runpy; runpy.run_module("UnrealMCPython.tests.run_all", run_name="__main_
 |------|---------|----------|--------|
 | 1 Drift | `validate_tools.py` | catalog param names == `ue_*` signatures | no |
 | 2 Routing | `pytest tests/test_dispatcher.py` `test_core.py` | dispatcher routing + result unwrapping | no |
+| 2b Logic | `pytest tests/test_graph_resolution_cpp.py` | C++ graph-path resolution semantics, compiled against stubs | no |
 | 3 In-editor | `tests/run_all.py` in UE | `ue_*` actually work against Unreal | yes |
 | 4 E2E | `pytest tests/test_e2e.py` | full chain incl. TCP + unwrap (skips if `:12029` closed) | yes |
 
 `test_coverage.py` enforces that **every** catalog action has an in-editor test
 (or is listed in `KNOWN_UNTESTED`, which should stay empty).
+
+**Gate 2b** slices the sentinel-delimited graph-resolution region out of
+`MCPythonHelperInternal.h` and compiles it against `tests/cpp/ue_stubs.h`, so the
+path/ambiguity semantics get real coverage on hosted CI, which has no engine. It
+extracts from the header at test time rather than duplicating it, so it cannot pass
+against a stale copy; it skips when no C++ compiler is found (set `CXX` to point at
+Unreal's bundled clang on a box with no system toolchain). It proves the *algorithm*,
+not the Unreal integration — gate 3 still owns that.
 
 **E2E editor-crash guard**: if the editor dies mid-suite, the remaining E2E tests FAIL
 (autouse fixture + connection-error assertions + a final liveness canary). A green E2E

@@ -127,6 +127,16 @@ public:
     static FString ListBTNodeClasses();
 
     // ─── Blueprint Graph Helpers ──────────────────────────────────────────
+    //
+    // Every GraphName below accepts either a bare graph name or a slash path
+    // ("EventGraph/PrepareRefs/CalculateSpeed_2"), and resolves through collapsed
+    // graphs (UK2Node_Composite) and anim state-machine sub-graphs at any depth.
+    // A bare name that matches more than one graph is an error listing the
+    // candidates — use ListBlueprintGraphs to discover the paths.
+
+    /** List every graph in the Blueprint (including collapsed/nested ones) with its full path */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static FString ListBlueprintGraphs(UBlueprint* Blueprint);
 
     /** Get the full graph info (all nodes, pins, connections) for a Blueprint graph */
     UFUNCTION(BlueprintCallable, Category="Editor|MCPython")

@@ -30,7 +30,7 @@
 
 Unreal MCP connects AI assistants to the Unreal Editor through the [Model Context Protocol](https://modelcontextprotocol.io/). Spawn actors, build Blueprint graphs, construct Behavior Trees, design UMG widgets, edit materials, author cinematics — all from natural language.
 
-**274 actions across 22 domains**, plus `execute_python` as an escape hatch — run any BlueprintCallable function or editor subsystem the engine exposes to Python, on the fly.
+**279 actions across 22 domains**, plus `execute_python` as an escape hatch — run any BlueprintCallable function or editor subsystem the engine exposes to Python, on the fly.
 
 **Easy to extend.** Adding an action is a Python function plus a catalog regen — no C++ and no editor rebuild on the Python path. When you need something Python doesn't expose (e.g. reference-skeleton bones), an optional C++ helper layer is there too. See [CLAUDE.md](CLAUDE.md) for the step-by-step workflow.
 
@@ -44,7 +44,7 @@ Unreal MCP connects AI assistants to the Unreal Editor through the [Model Contex
 
 ## Features
 
-Each row is one **namespace tool**. The action set is large but the tool list stays small, so it never bloats the model's context. **274 actions across 22 domains.**
+Each row is one **namespace tool**. The action set is large but the tool list stays small, so it never bloats the model's context. **279 actions across 22 domains.**
 
 | Domain | Capabilities | Actions |
 |---|---|:---:|
@@ -52,7 +52,7 @@ Each row is one **namespace tool**. The action set is large but the tool list st
 | **asset** | Duplicate/rename/delete/save, list, dependencies & referencers, metadata tags, directories, search, FBX import/export, texture import, glTF/glb import. | 21 |
 | **state_tree** | Read trees, states, tasks & bindings; author states, native and Blueprint nodes, transitions, selection behaviour and property bindings; compile, validate, lint. (needs the UnrealMCPythonStateTree companion plugin) | 21 |
 | **material** | Create materials & instances, author expression graphs, connect to material properties, MI parameters (scalar/vector/texture/switch), reparent, auto-layout, introspection. | 20 |
-| **blueprint** | Create Blueprints, read/build graphs, add/connect/remove nodes, member variables (+ flags), SCS components, compile, auto-layout. | 19 |
+| **blueprint** | Create Blueprints, enumerate/read/build graphs (incl. collapsed graphs), add/connect/remove nodes, member variables (+ flags), SCS components, compile, auto-layout. | 20 |
 | **util** | Run arbitrary Unreal Python, console commands, CVar get/set, world↔screen projection, viewport camera, PIE control, project info, class/enum reflection, output log, log verbosity, LiveCoding compile (Windows only). | 19 |
 | **animation** | AnimSequence info, notify tracks, sync markers, float curves; SkeletalMesh sockets & bones (C++-backed); skeleton info. | 17 |
 | **umg** | Create Widget Blueprints, add/remove widgets, reparent/wrap/replace, properties, slot layout, text style, event binding, compile. | 15 |
@@ -112,7 +112,10 @@ The line is **C++ versus Blueprint**, not "structure versus logic":
 - **Blueprint logic is writable.** The `blueprint` domain builds graphs — event
   overrides, branches, sequences, casts, variable get/set, function calls — and
   compiles them, all in the running editor. Same for the assets every other domain
-  owns.
+  owns. **Collapsed graphs are included:** every action taking a `graph_name` also
+  accepts a path like `EventGraph/PrepareRefs/CalculateSpeed_2`, so logic hidden
+  inside a composite node is as readable and editable as anything top-level.
+  `list_blueprint_graphs` enumerates the whole graph tree with those paths.
 - **C++ is not**, and cannot be. The MCP server runs *inside* the editor process
   (`FUnrealMCPythonModule::StartupModule`). Adopting a C++ change means the editor
   exits, UnrealBuildTool runs, and the editor relaunches — which kills the MCP
@@ -273,9 +276,9 @@ Pass any action below to its domain tool. Use `{ "action": "list_actions" }` on 
 </details>
 
 <details>
-<summary><strong>blueprint</strong> (19)</summary>
+<summary><strong>blueprint</strong> (20)</summary>
 
-`add_blueprint_node` · `add_component_to_blueprint` · `add_variable` · `auto_layout_graph` · `build_blueprint_graph` · `compile_blueprint` · `connect_blueprint_pins` · `create_blueprint` · `get_blueprint_graph_info` · `get_selected_bp_node_infos` · `get_selected_bp_nodes` · `list_blueprint_components` · `list_blueprint_variables` · `list_callable_functions` · `remove_blueprint_node` · `remove_component_from_blueprint` · `set_blueprint_node_position` · `set_component_property` · `set_variable_flags`
+`add_blueprint_node` · `add_component_to_blueprint` · `add_variable` · `auto_layout_graph` · `build_blueprint_graph` · `compile_blueprint` · `connect_blueprint_pins` · `create_blueprint` · `get_blueprint_graph_info` · `get_selected_bp_node_infos` · `get_selected_bp_nodes` · `list_blueprint_components` · `list_blueprint_graphs` · `list_blueprint_variables` · `list_callable_functions` · `remove_blueprint_node` · `remove_component_from_blueprint` · `set_blueprint_node_position` · `set_component_property` · `set_variable_flags`
 
 </details>
 
