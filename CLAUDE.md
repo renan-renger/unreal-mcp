@@ -77,9 +77,11 @@ import runpy; runpy.run_module("UnrealMCPython.tests.run_all", run_name="__main_
 `MCPythonHelperInternal.h` and compiles it against `tests/cpp/ue_stubs.h`, so the
 path/ambiguity semantics get real coverage on hosted CI, which has no engine. It
 extracts from the header at test time rather than duplicating it, so it cannot pass
-against a stale copy; it skips when no C++ compiler is found (set `CXX` to point at
-Unreal's bundled clang on a box with no system toolchain). It proves the *algorithm*,
-not the Unreal integration — gate 3 still owns that.
+against a stale copy. The compiler is `$CXX`, else a system `g++`/`clang++`/`c++`,
+else Unreal's own bundled clang, found under `~/UnrealToolchains` or inside an engine
+recorded in `~/.config/Epic/UnrealEngine/Install.ini` — a Linux box that builds this
+plugin typically has no system toolchain, and a gate that skips there reads as a pass.
+It proves the *algorithm*, not the Unreal integration — gate 3 still owns that.
 
 **E2E editor-crash guard**: if the editor dies mid-suite, the remaining E2E tests FAIL
 (autouse fixture + connection-error assertions + a final liveness canary). A green E2E
