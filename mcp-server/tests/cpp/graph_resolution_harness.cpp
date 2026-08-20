@@ -72,6 +72,42 @@ int main() {
     BP.MacroGraphs.Add(TObjectPtr<UEdGraph>(&Loop));
     Check(EnumerateBlueprintGraphs(&BP).Num() == 6, "self-referencing graph terminates");
 
+    // Same-parent collision. Mirrors what build_anim_state_machine produces: every
+    // transition graph of a state machine is named "Transition", each owned by its own
+    // node. Without disambiguation both would carry the identical path, leaving them
+    // unaddressable while the error told the caller to pass a longer path that does
+    // not exist.
+    UEdGraph Anim("AnimGraph"), Machine("New State Machine");
+    UEdGraph TransA("Transition"), TransB("Transition");
+    FComposite SM;  SM.Bound = &Machine; SM.NodeName = "AnimGraphNode_StateMachine_0";
+    FComposite TA;  TA.Bound = &TransA;  TA.NodeName = "AnimStateTransitionNode_0";
+    FComposite TB;  TB.Bound = &TransB;  TB.NodeName = "AnimStateTransitionNode_1";
+    Anim.Nodes.Add(&SM);
+    Machine.Nodes.Add(&TA); Machine.Nodes.Add(&TB);
+    BP.FunctionGraphs.Add(TObjectPtr<UEdGraph>(&Anim));
+
+    auto All2 = EnumerateBlueprintGraphs(&BP);
+    auto PathOf = [&](UEdGraph* G) {
+        for (const auto& Entry : All2) if (Entry.Graph == G) return Entry.Path;
+        return FString("");
+    };
+    Check(All2.Num() == 10,                                             "collision drops no graph");
+    Check(PathOf(&TransA).S != PathOf(&TransB).S,                       "colliding siblings get distinct paths");
+    Check(PathOf(&TransA).S == "AnimGraph/New State Machine/Transition#AnimStateTransitionNode_0",
+                                                                        "disambiguator is the owning node");
+    Check(PathOf(&Machine).S == "AnimGraph/New State Machine",           "non-colliding name is left alone");
+
+    Check(R("AnimGraph/New State Machine/Transition#AnimStateTransitionNode_0") == &TransA,
+                                                                        "disambiguated full path resolves");
+    Check(R("Transition#AnimStateTransitionNode_1") == &TransB,          "disambiguated segment resolves bare");
+    Check(R("Transition") == nullptr,                                   "colliding bare name still refuses to guess");
+    Check(E.S.find("ambiguous") != std::string::npos,                   "collision reported as ambiguity, not not-found");
+    Check(E.S.find("Transition#AnimStateTransitionNode_0") != std::string::npos &&
+          E.S.find("Transition#AnimStateTransitionNode_1") != std::string::npos,
+                                                                        "both usable paths offered");
+    Check(E.S.find("longer path") == std::string::npos,                 "no impossible longer-path advice");
+    Check(R("New State Machine/Transition") == nullptr,                 "partial path over a collision stays ambiguous");
+
     printf("\n%s (%d failure(s))\n", Failures ? "FAILED" : "ALL PASSED", Failures);
     return Failures != 0;
 }

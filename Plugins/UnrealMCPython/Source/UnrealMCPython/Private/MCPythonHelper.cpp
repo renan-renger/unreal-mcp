@@ -53,6 +53,7 @@
 #include "K2Node_SpawnActorFromClass.h"
 #include "K2Node_AddDelegate.h"
 #include "K2Node_CallDelegate.h"
+#include "K2Node_Composite.h"
 #include "EdGraphSchema_K2.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -846,9 +847,33 @@ static UEdGraphNode* CreateBPNodeFromJson(UEdGraph* Graph, UBlueprint* Blueprint
         Creator.Finalize();
         NewNode = SpawnNode;
     }
+    else if (NodeType == TEXT("Composite"))
+    {
+        // A collapsed graph. Everything that makes the composite real - the bound
+        // graph, its entry/exit tunnels, and the parent's SubGraphs entry - is built
+        // by UK2Node_Composite::PostPlacedNewNode, which Finalize() calls. Setting
+        // BoundGraph by hand instead would leave a tunnel-less half-node, and it is
+        // not reachable from Python anyway: the property is a bare UPROPERTY().
+        FGraphNodeCreator<UK2Node_Composite> Creator(*Graph);
+        UK2Node_Composite* CompositeNode = Creator.CreateNode(false);
+        CompositeNode->NodePosX = PosX;
+        CompositeNode->NodePosY = PosY;
+        Creator.Finalize();
+
+        FString GraphName;
+        if (NodeJson->TryGetStringField(TEXT("graph_name"), GraphName) && !GraphName.IsEmpty()
+            && CompositeNode->BoundGraph)
+        {
+            // RenameGraph uniquifies against siblings, so the resulting name can differ
+            // from the request. Callers read the real one back from list_blueprint_graphs.
+            FBlueprintEditorUtils::RenameGraph(CompositeNode->BoundGraph, GraphName);
+        }
+
+        NewNode = CompositeNode;
+    }
     else
     {
-        OutError = FString::Printf(TEXT("Unknown node type '%s'. Supported: CallFunction, Event, CustomEvent, CastTo, Branch, Sequence, VariableGet, VariableSet, MacroInstance, InputKey, SpawnActor, AddDelegate, CallDelegate."), *NodeType);
+        OutError = FString::Printf(TEXT("Unknown node type '%s'. Supported: CallFunction, Event, CustomEvent, CastTo, Branch, Sequence, VariableGet, VariableSet, MacroInstance, InputKey, SpawnActor, AddDelegate, CallDelegate, Composite."), *NodeType);
         return nullptr;
     }
 

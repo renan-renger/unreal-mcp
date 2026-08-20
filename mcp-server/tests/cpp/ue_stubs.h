@@ -97,7 +97,10 @@ template <typename T> struct TObjectPtr {
 struct UEdGraph; struct UEdGraphNode;
 struct UEdGraphNode {
     virtual TArray<UEdGraph*> GetSubGraphs() const { return TArray<UEdGraph*>(); }
-    FString GetName() const { return FString("N"); }
+    // Per-node, because the resolver disambiguates same-named sibling graphs by the
+    // name of the node that owns them.
+    std::string NodeName = "N";
+    FString GetName() const { return FString(NodeName.c_str()); }
     virtual ~UEdGraphNode() {}
 };
 struct UEdGraph {

@@ -113,9 +113,82 @@ inline void CollectChildGraphs(UEdGraph* Graph, TArray<TPair<UEdGraph*, UEdGraph
     }
 }
 
+/** Is this exact segment already spoken for in a sibling set? */
+inline bool SegmentsContain(const TArray<FString>& Segments, const FString& Candidate)
+{
+    for (const FString& Segment : Segments)
+    {
+        if (Segment.Equals(Candidate, ESearchCase::CaseSensitive))
+            return true;
+    }
+    return false;
+}
+
+/**
+ * Path segments for one sibling set, disambiguated where two children share a name.
+ *
+ * A bound graph is outered to the NODE that owns it, not to the parent graph — both
+ * UK2Node_Composite and AnimStateTransitionNode build theirs with
+ * FBlueprintEditorUtils::CreateNewGraph(this, NAME_None, ...). UObject name uniqueness
+ * is per-outer, so it does not span siblings: every transition graph of a state machine
+ * is named "Transition". UK2Node_Composite escapes this only because it additionally
+ * renames its bound graph against the parent's SubGraphs array
+ * (RenameBoundGraphCloseToName); nothing does that for anim nodes.
+ *
+ * Colliding siblings therefore get "<Name>#<OwningNode>". That is unique because nodes
+ * ARE outered to their graph, so their names cannot repeat within it. Names that do not
+ * collide are left alone, so an ordinary path stays "EventGraph/PrepareRefs".
+ */
+inline TArray<FString> MakeSiblingSegments(const TArray<TPair<UEdGraph*, UEdGraphNode*>>& Children)
+{
+    TArray<FString> Segments;
+
+    for (int32 i = 0; i < Children.Num(); ++i)
+    {
+        UEdGraph* Child = Children[i].Key;
+        if (!Child)
+        {
+            Segments.Add(FString());
+            continue;
+        }
+
+        const FString Name = Child->GetName();
+
+        int32 SameName = 0;
+        for (const TPair<UEdGraph*, UEdGraphNode*>& Other : Children)
+        {
+            if (Other.Key && Other.Key->GetName().Equals(Name, ESearchCase::CaseSensitive))
+                ++SameName;
+        }
+
+        FString Segment = Name;
+        if (SameName > 1)
+        {
+            // Index fallback for a child that came from the SubGraphs array, which
+            // carries no owning node.
+            const FString Owner = Children[i].Value ? Children[i].Value->GetName() : FString();
+            Segment = Name + TEXT("#") + (Owner.IsEmpty() ? FString::Printf(TEXT("%d"), i) : Owner);
+        }
+
+        // Defensive: two owning nodes cannot share a name, but never hand back a
+        // duplicate segment whatever the graph turns out to contain.
+        FString Unique = Segment;
+        int32 Suffix = 2;
+        while (SegmentsContain(Segments, Unique))
+        {
+            Unique = Segment + TEXT("#") + FString::Printf(TEXT("%d"), Suffix);
+            ++Suffix;
+        }
+        Segments.Add(Unique);
+    }
+
+    return Segments;
+}
+
 /** Depth-first walk of one root graph, appending every graph in its subtree. */
-inline void EnumerateGraphSubtree(UEdGraph* Graph, const FString& ParentPath, const FString& RootKind,
-    UEdGraphNode* OwningNode, int32 Depth, TSet<UEdGraph*>& Visited, TArray<FMCPythonGraphEntry>& Out)
+inline void EnumerateGraphSubtree(UEdGraph* Graph, const FString& Segment, const FString& ParentPath,
+    const FString& RootKind, UEdGraphNode* OwningNode, int32 Depth,
+    TSet<UEdGraph*>& Visited, TArray<FMCPythonGraphEntry>& Out)
 {
     // Visited guards against a graph reachable by two routes (or, defensively, a
     // cycle): without it a shared bound graph would recurse forever.
@@ -123,7 +196,7 @@ inline void EnumerateGraphSubtree(UEdGraph* Graph, const FString& ParentPath, co
     Visited.Add(Graph);
 
     FMCPythonGraphEntry Entry;
-    Entry.Path = ParentPath.IsEmpty() ? Graph->GetName() : (ParentPath + TEXT("/") + Graph->GetName());
+    Entry.Path = ParentPath.IsEmpty() ? Segment : (ParentPath + TEXT("/") + Segment);
     Entry.Graph = Graph;
     Entry.RootKind = RootKind;
     Entry.OwningNode = OwningNode;
@@ -132,9 +205,11 @@ inline void EnumerateGraphSubtree(UEdGraph* Graph, const FString& ParentPath, co
 
     TArray<TPair<UEdGraph*, UEdGraphNode*>> Children;
     CollectChildGraphs(Graph, Children);
-    for (const TPair<UEdGraph*, UEdGraphNode*>& Child : Children)
+    const TArray<FString> ChildSegments = MakeSiblingSegments(Children);
+    for (int32 i = 0; i < Children.Num(); ++i)
     {
-        EnumerateGraphSubtree(Child.Key, Entry.Path, RootKind, Child.Value, Depth + 1, Visited, Out);
+        EnumerateGraphSubtree(Children[i].Key, ChildSegments[i], Entry.Path, RootKind,
+            Children[i].Value, Depth + 1, Visited, Out);
     }
 }
 
@@ -148,11 +223,14 @@ inline TArray<FMCPythonGraphEntry> EnumerateBlueprintGraphs(UBlueprint* Blueprin
 
     // IntermediateGeneratedGraphs and EventGraphs are transient compile artefacts
     // (UPROPERTY(transient, duplicatetransient)) — deliberately not enumerated.
+    // Root graphs need no disambiguation: they are all outered to the Blueprint
+    // itself, so UObject naming already keeps them unique.
     auto AddRoots = [&](const TArray<TObjectPtr<UEdGraph>>& Roots, const TCHAR* Kind)
     {
         for (UEdGraph* Graph : Roots)
         {
-            EnumerateGraphSubtree(Graph, FString(), Kind, nullptr, 0, Visited, Out);
+            if (!Graph) continue;
+            EnumerateGraphSubtree(Graph, Graph->GetName(), FString(), Kind, nullptr, 0, Visited, Out);
         }
     };
 
@@ -189,6 +267,40 @@ inline TArray<FString> SplitGraphPath(const FString& GraphPath)
  * all resolve to the same graph, and a name that collides is disambiguated by
  * prepending parents rather than by inventing a separate syntax.
  */
+/**
+ * The part of a segment before its '#' disambiguator, or the whole segment.
+ *
+ * A graph whose own name contained a '#' would read as disambiguated here, so a query
+ * for its base name would report it as a candidate rather than resolving it outright.
+ * Its exact path still resolves, and Blueprint graph names do not carry '#' in practice.
+ */
+inline FString GraphSegmentBaseName(const FString& Segment)
+{
+    TArray<FString> Parts;
+    Segment.ParseIntoArray(Parts, TEXT("#"), /*InCullEmpty=*/true);
+    return Parts.Num() > 0 ? Parts[0] : Segment;
+}
+
+/**
+ * Does one query segment match one path segment?
+ *
+ * A query that names no disambiguator matches every segment sharing its base name, so
+ * a colliding bare name still reports as ambiguous — listing paths that work — instead
+ * of dead-ending as not-found.
+ */
+inline bool GraphSegmentMatches(const FString& EntrySegment, const FString& QuerySegment, ESearchCase::Type Case)
+{
+    if (EntrySegment.Equals(QuerySegment, Case))
+        return true;
+
+    TArray<FString> QueryParts;
+    QuerySegment.ParseIntoArray(QueryParts, TEXT("#"), /*InCullEmpty=*/true);
+    if (QueryParts.Num() != 1)
+        return false;
+
+    return GraphSegmentBaseName(EntrySegment).Equals(QuerySegment, Case);
+}
+
 inline bool GraphPathMatchesSuffix(const FMCPythonGraphEntry& Entry, const TArray<FString>& Segments, ESearchCase::Type Case)
 {
     TArray<FString> EntrySegments = SplitGraphPath(Entry.Path);
@@ -198,7 +310,7 @@ inline bool GraphPathMatchesSuffix(const FMCPythonGraphEntry& Entry, const TArra
     const int32 Offset = EntrySegments.Num() - Segments.Num();
     for (int32 i = 0; i < Segments.Num(); ++i)
     {
-        if (!EntrySegments[Offset + i].Equals(Segments[i], Case))
+        if (!GraphSegmentMatches(EntrySegments[Offset + i], Segments[i], Case))
             return false;
     }
     return true;
@@ -255,9 +367,12 @@ inline UEdGraph* ResolveBlueprintGraph(UBlueprint* Blueprint, const FString& Gra
         TArray<FString> Candidates;
         for (const FMCPythonGraphEntry* Hit : Hits)
             Candidates.Add(Hit->Path);
+        // Every candidate path is unique (MakeSiblingSegments guarantees it), so the
+        // caller can always act on this: pass one of them back verbatim. Never advise
+        // "a longer path" — siblings that differ only by owning node have none.
         OutError = FString::Printf(
-            TEXT("Graph '%s' is ambiguous - %d graphs match: %s. Pass a longer path to disambiguate (e.g. 'EventGraph/%s')."),
-            *GraphPath, Hits.Num(), *FString::Join(Candidates, TEXT(", ")), *Segments.Last());
+            TEXT("Graph '%s' is ambiguous - %d graphs match. Pass one of these paths exactly: %s"),
+            *GraphPath, Hits.Num(), *FString::Join(Candidates, TEXT(", ")));
         return nullptr;
     }
 

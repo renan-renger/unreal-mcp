@@ -52,7 +52,7 @@ Each row is one **namespace tool**. The action set is large but the tool list st
 | **asset** | Duplicate/rename/delete/save, list, dependencies & referencers, metadata tags, directories, search, FBX import/export, texture import, glTF/glb import. | 21 |
 | **state_tree** | Read trees, states, tasks & bindings; author states, native and Blueprint nodes, transitions, selection behaviour and property bindings; compile, validate, lint. (needs the UnrealMCPythonStateTree companion plugin) | 21 |
 | **material** | Create materials & instances, author expression graphs, connect to material properties, MI parameters (scalar/vector/texture/switch), reparent, auto-layout, introspection. | 20 |
-| **blueprint** | Create Blueprints, enumerate/read/build graphs (incl. collapsed graphs), add/connect/remove nodes, member variables (+ flags), SCS components, compile, auto-layout. | 20 |
+| **blueprint** | Create Blueprints, enumerate/read/build graphs (incl. creating collapsed graphs), add/connect/remove nodes, member variables (+ flags), SCS components, compile, auto-layout. | 20 |
 | **util** | Run arbitrary Unreal Python, console commands, CVar get/set, world↔screen projection, viewport camera, PIE control, project info, class/enum reflection, output log, log verbosity, LiveCoding compile (Windows only). | 19 |
 | **animation** | AnimSequence info, notify tracks, sync markers, float curves; SkeletalMesh sockets & bones (C++-backed); skeleton info. | 17 |
 | **umg** | Create Widget Blueprints, add/remove widgets, reparent/wrap/replace, properties, slot layout, text style, event binding, compile. | 15 |
@@ -114,8 +114,11 @@ The line is **C++ versus Blueprint**, not "structure versus logic":
   compiles them, all in the running editor. Same for the assets every other domain
   owns. **Collapsed graphs are included:** every action taking a `graph_name` also
   accepts a path like `EventGraph/PrepareRefs/CalculateSpeed_2`, so logic hidden
-  inside a composite node is as readable and editable as anything top-level.
-  `list_blueprint_graphs` enumerates the whole graph tree with those paths.
+  inside a composite node is as readable and editable as anything top-level, and
+  `add_blueprint_node` with `{"type": "Composite"}` creates one.
+  `list_blueprint_graphs` enumerates the whole graph tree with those paths. Graphs
+  that share a name with a sibling (every transition graph of an anim state machine
+  is called `Transition`) are addressed as `Transition#AnimStateTransitionNode_0`.
 - **C++ is not**, and cannot be. The MCP server runs *inside* the editor process
   (`FUnrealMCPythonModule::StartupModule`). Adopting a C++ change means the editor
   exits, UnrealBuildTool runs, and the editor relaunches — which kills the MCP
