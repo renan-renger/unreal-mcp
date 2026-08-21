@@ -53,6 +53,7 @@
 #include "K2Node_SpawnActorFromClass.h"
 #include "K2Node_AddDelegate.h"
 #include "K2Node_CallDelegate.h"
+#include "K2Node_Composite.h"
 #include "EdGraphSchema_K2.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -179,6 +180,60 @@ TArray<FMCPythonBlueprintNodeInfo> UMCPythonHelper::GetSelectedBlueprintNodeInfo
 
 // ─── Blueprint Graph Helpers (internal) ──────────────────────────────────────
 
+// ─── ListBlueprintGraphs ─────────────────────────────────────────────────────
+
+FString UMCPythonHelper::ListBlueprintGraphs(UBlueprint* Blueprint)
+{
+    if (!Blueprint)
+        return MakeJsonError(TEXT("Invalid Blueprint."));
+
+    const TArray<FMCPythonGraphEntry> Entries = EnumerateBlueprintGraphs(Blueprint);
+
+    // A leaf name that occurs once can be addressed bare; anything else needs a
+    // longer path. Reporting that per row saves the caller a failed call to find out.
+    TMap<FString, int32> LeafCounts;
+    for (const FMCPythonGraphEntry& Entry : Entries)
+    {
+        if (Entry.Graph)
+            LeafCounts.FindOrAdd(Entry.Graph->GetName())++;
+    }
+
+    TArray<TSharedPtr<FJsonValue>> GraphsArr;
+    for (const FMCPythonGraphEntry& Entry : Entries)
+    {
+        if (!Entry.Graph) continue;
+
+        const FString LeafName = Entry.Graph->GetName();
+
+        TSharedPtr<FJsonObject> Obj = MakeShareable(new FJsonObject());
+        Obj->SetStringField(TEXT("path"), Entry.Path);
+        Obj->SetStringField(TEXT("name"), LeafName);
+        Obj->SetStringField(TEXT("root_kind"), Entry.RootKind);
+        Obj->SetNumberField(TEXT("depth"), Entry.Depth);
+        Obj->SetNumberField(TEXT("node_count"), Entry.Graph->Nodes.Num());
+        Obj->SetBoolField(TEXT("name_is_unique"), LeafCounts.FindRef(LeafName) == 1);
+
+        if (Entry.OwningNode)
+        {
+            // Nested graph: say which node it hangs off, and of what class, so the
+            // caller can tell a collapsed graph from an anim state at a glance.
+            Obj->SetStringField(TEXT("owning_node"), Entry.OwningNode->GetName());
+            Obj->SetStringField(TEXT("owning_node_title"),
+                Entry.OwningNode->GetNodeTitle(ENodeTitleType::ListView).ToString());
+            Obj->SetStringField(TEXT("owning_node_class"), Entry.OwningNode->GetClass()->GetName());
+        }
+
+        GraphsArr.Add(MakeShareable(new FJsonValueObject(Obj)));
+    }
+
+    TSharedPtr<FJsonObject> Result = MakeShareable(new FJsonObject());
+    Result->SetBoolField(TEXT("success"), true);
+    Result->SetStringField(TEXT("blueprint"), Blueprint->GetPathName());
+    Result->SetNumberField(TEXT("graph_count"), GraphsArr.Num());
+    Result->SetArrayField(TEXT("graphs"), GraphsArr);
+    return SerializeJsonObj(Result);
+}
+
 // ─── GetBlueprintGraphInfo ───────────────────────────────────────────────────
 
 FString UMCPythonHelper::GetBlueprintGraphInfo(UBlueprint* Blueprint, const FString& GraphName)
@@ -186,9 +241,10 @@ FString UMCPythonHelper::GetBlueprintGraphInfo(UBlueprint* Blueprint, const FStr
     if (!Blueprint)
         return MakeJsonError(TEXT("Invalid Blueprint."));
 
-    UEdGraph* Graph = FindGraphByName(Blueprint, GraphName);
+    FString GraphError;
+    UEdGraph* Graph = ResolveBlueprintGraph(Blueprint, GraphName, GraphError);
     if (!Graph)
-        return MakeJsonError(FString::Printf(TEXT("Graph '%s' not found in Blueprint."), *GraphName));
+        return MakeJsonError(GraphError);
 
     TArray<TSharedPtr<FJsonValue>> NodesArr;
     for (UEdGraphNode* Node : Graph->Nodes)
@@ -791,9 +847,33 @@ static UEdGraphNode* CreateBPNodeFromJson(UEdGraph* Graph, UBlueprint* Blueprint
         Creator.Finalize();
         NewNode = SpawnNode;
     }
+    else if (NodeType == TEXT("Composite"))
+    {
+        // A collapsed graph. Everything that makes the composite real - the bound
+        // graph, its entry/exit tunnels, and the parent's SubGraphs entry - is built
+        // by UK2Node_Composite::PostPlacedNewNode, which Finalize() calls. Setting
+        // BoundGraph by hand instead would leave a tunnel-less half-node, and it is
+        // not reachable from Python anyway: the property is a bare UPROPERTY().
+        FGraphNodeCreator<UK2Node_Composite> Creator(*Graph);
+        UK2Node_Composite* CompositeNode = Creator.CreateNode(false);
+        CompositeNode->NodePosX = PosX;
+        CompositeNode->NodePosY = PosY;
+        Creator.Finalize();
+
+        FString GraphName;
+        if (NodeJson->TryGetStringField(TEXT("graph_name"), GraphName) && !GraphName.IsEmpty()
+            && CompositeNode->BoundGraph)
+        {
+            // RenameGraph uniquifies against siblings, so the resulting name can differ
+            // from the request. Callers read the real one back from list_blueprint_graphs.
+            FBlueprintEditorUtils::RenameGraph(CompositeNode->BoundGraph, GraphName);
+        }
+
+        NewNode = CompositeNode;
+    }
     else
     {
-        OutError = FString::Printf(TEXT("Unknown node type '%s'. Supported: CallFunction, Event, CustomEvent, CastTo, Branch, Sequence, VariableGet, VariableSet, MacroInstance, InputKey, SpawnActor, AddDelegate, CallDelegate."), *NodeType);
+        OutError = FString::Printf(TEXT("Unknown node type '%s'. Supported: CallFunction, Event, CustomEvent, CastTo, Branch, Sequence, VariableGet, VariableSet, MacroInstance, InputKey, SpawnActor, AddDelegate, CallDelegate, Composite."), *NodeType);
         return nullptr;
     }
 
@@ -849,9 +929,10 @@ FString UMCPythonHelper::AddBlueprintNode(UBlueprint* Blueprint, const FString& 
     if (!Blueprint)
         return MakeJsonError(TEXT("Invalid Blueprint."));
 
-    UEdGraph* Graph = FindGraphByName(Blueprint, GraphName);
+    FString GraphError;
+    UEdGraph* Graph = ResolveBlueprintGraph(Blueprint, GraphName, GraphError);
     if (!Graph)
-        return MakeJsonError(FString::Printf(TEXT("Graph '%s' not found."), *GraphName));
+        return MakeJsonError(GraphError);
 
     TSharedPtr<FJsonObject> JsonObj;
     TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(NodeJson);
@@ -898,9 +979,10 @@ FString UMCPythonHelper::ConnectBlueprintPins(UBlueprint* Blueprint, const FStri
     if (!Blueprint)
         return MakeJsonError(TEXT("Invalid Blueprint."));
 
-    UEdGraph* Graph = FindGraphByName(Blueprint, GraphName);
+    FString GraphError;
+    UEdGraph* Graph = ResolveBlueprintGraph(Blueprint, GraphName, GraphError);
     if (!Graph)
-        return MakeJsonError(FString::Printf(TEXT("Graph '%s' not found."), *GraphName));
+        return MakeJsonError(GraphError);
 
     UEdGraphNode* SourceNode = FindBPNodeByName(Graph, SourceNodeName);
     if (!SourceNode)
@@ -963,9 +1045,10 @@ FString UMCPythonHelper::RemoveBlueprintNode(UBlueprint* Blueprint, const FStrin
     if (!Blueprint)
         return MakeJsonError(TEXT("Invalid Blueprint."));
 
-    UEdGraph* Graph = FindGraphByName(Blueprint, GraphName);
+    FString GraphError;
+    UEdGraph* Graph = ResolveBlueprintGraph(Blueprint, GraphName, GraphError);
     if (!Graph)
-        return MakeJsonError(FString::Printf(TEXT("Graph '%s' not found."), *GraphName));
+        return MakeJsonError(GraphError);
 
     UEdGraphNode* Node = FindBPNodeByName(Graph, NodeName);
     if (!Node)
@@ -1054,9 +1137,10 @@ FString UMCPythonHelper::BuildBlueprintGraph(UBlueprint* Blueprint, const FStrin
     if (!Blueprint)
         return MakeJsonError(TEXT("Invalid Blueprint."));
 
-    UEdGraph* Graph = FindGraphByName(Blueprint, GraphName);
+    FString GraphError;
+    UEdGraph* Graph = ResolveBlueprintGraph(Blueprint, GraphName, GraphError);
     if (!Graph)
-        return MakeJsonError(FString::Printf(TEXT("Graph '%s' not found."), *GraphName));
+        return MakeJsonError(GraphError);
 
     // Parse JSON
     TSharedPtr<FJsonObject> JsonObj;
@@ -1550,9 +1634,10 @@ FString UMCPythonHelper::SetBlueprintNodePosition(UBlueprint* Blueprint,
     if (!Blueprint)
         return MakeJsonError(TEXT("Invalid Blueprint."));
 
-    UEdGraph* Graph = FindGraphByName(Blueprint, GraphName);
+    FString GraphError;
+    UEdGraph* Graph = ResolveBlueprintGraph(Blueprint, GraphName, GraphError);
     if (!Graph)
-        return MakeJsonError(FString::Printf(TEXT("Graph '%s' not found."), *GraphName));
+        return MakeJsonError(GraphError);
 
     UEdGraphNode* Node = FindBPNodeByName(Graph, NodeName);
     if (!Node)
@@ -1581,9 +1666,10 @@ FString UMCPythonHelper::SetBlueprintNodePinDefault(UBlueprint* Blueprint,
     if (!Blueprint)
         return MakeJsonError(TEXT("Invalid Blueprint."));
 
-    UEdGraph* Graph = FindGraphByName(Blueprint, GraphName);
+    FString GraphError;
+    UEdGraph* Graph = ResolveBlueprintGraph(Blueprint, GraphName, GraphError);
     if (!Graph)
-        return MakeJsonError(FString::Printf(TEXT("Graph '%s' not found."), *GraphName));
+        return MakeJsonError(GraphError);
 
     UEdGraphNode* Node = FindBPNodeByName(Graph, NodeName);
     if (!Node)

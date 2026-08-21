@@ -377,7 +377,7 @@ CATALOG = {
     'blueprint': {
         'add_blueprint_node': {
             'params': "asset_path, graph_name='EventGraph', node_json",
-            'doc': 'Adds a single node to a Blueprint graph.',
+            'doc': "Adds a single node to a Blueprint graph. graph_name accepts a collapsed-graph path (e.g. 'EventGraph/PrepareRefs').",
         },
         'add_component_to_blueprint': {
             'params': "asset_path, component_class_path, component_name, location_x=0.0, location_y=0.0, location_z=0.0, rotation_pitch=0.0, rotation_yaw=0.0, rotation_roll=0.0, parent_component_name=''",
@@ -389,11 +389,11 @@ CATALOG = {
         },
         'auto_layout_graph': {
             'params': "asset_path, graph_name='EventGraph', x_step=380.0, y_step=200.0",
-            'doc': 'Auto-lays out all nodes in a Blueprint graph using DAG topological sort.',
+            'doc': "Auto-lays out all nodes in a Blueprint graph using DAG topological sort. graph_name accepts a collapsed-graph path (e.g. 'EventGraph/PrepareRefs').",
         },
         'build_blueprint_graph': {
             'params': "asset_path, graph_name='EventGraph', graph_structure",
-            'doc': 'Builds a Blueprint graph from JSON adjacency list.',
+            'doc': "Builds a Blueprint graph from JSON adjacency list. graph_name accepts a collapsed-graph path (e.g. 'EventGraph/PrepareRefs').",
         },
         'compile_blueprint': {
             'params': 'asset_path',
@@ -401,7 +401,7 @@ CATALOG = {
         },
         'connect_blueprint_pins': {
             'params': "asset_path, graph_name='EventGraph', source_node, source_pin, target_node, target_pin",
-            'doc': 'Connects two pins in a Blueprint graph.',
+            'doc': "Connects two pins in a Blueprint graph. graph_name accepts a collapsed-graph path (e.g. 'EventGraph/PrepareRefs').",
         },
         'create_blueprint': {
             'params': "asset_path, parent_class_path='/Script/Engine.Actor'",
@@ -409,7 +409,7 @@ CATALOG = {
         },
         'get_blueprint_graph_info': {
             'params': "asset_path, graph_name='EventGraph'",
-            'doc': 'Returns the full graph info for a Blueprint graph.',
+            'doc': "Returns the full graph info for a Blueprint graph. graph_name accepts a collapsed-graph path (e.g. 'EventGraph/PrepareRefs').",
         },
         'get_selected_bp_node_infos': {
             'params': '',
@@ -423,6 +423,10 @@ CATALOG = {
             'params': 'asset_path',
             'doc': 'Lists all SCS components on a Blueprint.',
         },
+        'list_blueprint_graphs': {
+            'params': 'asset_path',
+            'doc': 'Lists every graph in a Blueprint with its full path, including collapsed/nested graphs.',
+        },
         'list_blueprint_variables': {
             'params': 'asset_path',
             'doc': 'Lists all variables defined in a Blueprint.',
@@ -433,7 +437,7 @@ CATALOG = {
         },
         'remove_blueprint_node': {
             'params': "asset_path, graph_name='EventGraph', node_name",
-            'doc': 'Removes a node from a Blueprint graph.',
+            'doc': "Removes a node from a Blueprint graph. graph_name accepts a collapsed-graph path (e.g. 'EventGraph/PrepareRefs').",
         },
         'remove_component_from_blueprint': {
             'params': 'asset_path, component_name',
@@ -441,7 +445,7 @@ CATALOG = {
         },
         'set_blueprint_node_position': {
             'params': "asset_path, graph_name='EventGraph', node_name, pos_x=0.0, pos_y=0.0",
-            'doc': 'Sets the canvas position of a node in a Blueprint graph.',
+            'doc': "Sets the canvas position of a node in a Blueprint graph. graph_name accepts a collapsed-graph path (e.g. 'EventGraph/PrepareRefs').",
         },
         'set_component_property': {
             'params': 'asset_path, component_name, property_name, value',

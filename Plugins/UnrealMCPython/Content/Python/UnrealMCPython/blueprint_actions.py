@@ -94,8 +94,21 @@ def ue_get_selected_bp_node_infos() -> str:
         return json.dumps({"success": False, "message": str(e), "traceback": traceback.format_exc()})
 
 
+def ue_list_blueprint_graphs(asset_path: str = None) -> str:
+    """Lists every graph in a Blueprint with its full path, including collapsed/nested graphs."""
+    if asset_path is None:
+        return json.dumps({"success": False, "message": "Required parameter 'asset_path' is missing."})
+    try:
+        bp, err = _load_asset(asset_path, unreal.Blueprint)
+        if err:
+            return err
+        return unreal.MCPythonHelper.list_blueprint_graphs(bp)
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e), "traceback": traceback.format_exc()})
+
+
 def ue_get_blueprint_graph_info(asset_path: str = None, graph_name: str = "EventGraph") -> str:
-    """Returns the full graph info for a Blueprint graph."""
+    """Returns the full graph info for a Blueprint graph. graph_name accepts a collapsed-graph path (e.g. 'EventGraph/PrepareRefs')."""
     if asset_path is None:
         return json.dumps({"success": False, "message": "Required parameter 'asset_path' is missing."})
     try:
@@ -140,7 +153,7 @@ def ue_list_blueprint_variables(asset_path: str = None) -> str:
 
 def ue_add_blueprint_node(asset_path: str = None, graph_name: str = "EventGraph",
                           node_json: dict = None) -> str:
-    """Adds a single node to a Blueprint graph."""
+    """Adds a single node to a Blueprint graph. graph_name accepts a collapsed-graph path (e.g. 'EventGraph/PrepareRefs')."""
     if asset_path is None:
         return json.dumps({"success": False, "message": "Required parameter 'asset_path' is missing."})
     if node_json is None:
@@ -159,7 +172,7 @@ def ue_add_blueprint_node(asset_path: str = None, graph_name: str = "EventGraph"
 def ue_connect_blueprint_pins(asset_path: str = None, graph_name: str = "EventGraph",
                               source_node: str = None, source_pin: str = None,
                               target_node: str = None, target_pin: str = None) -> str:
-    """Connects two pins in a Blueprint graph."""
+    """Connects two pins in a Blueprint graph. graph_name accepts a collapsed-graph path (e.g. 'EventGraph/PrepareRefs')."""
     if asset_path is None:
         return json.dumps({"success": False, "message": "Required parameter 'asset_path' is missing."})
     for name, val in [("source_node", source_node), ("source_pin", source_pin),
@@ -179,7 +192,7 @@ def ue_connect_blueprint_pins(asset_path: str = None, graph_name: str = "EventGr
 
 def ue_remove_blueprint_node(asset_path: str = None, graph_name: str = "EventGraph",
                              node_name: str = None) -> str:
-    """Removes a node from a Blueprint graph."""
+    """Removes a node from a Blueprint graph. graph_name accepts a collapsed-graph path (e.g. 'EventGraph/PrepareRefs')."""
     if asset_path is None:
         return json.dumps({"success": False, "message": "Required parameter 'asset_path' is missing."})
     if node_name is None:
@@ -196,7 +209,7 @@ def ue_remove_blueprint_node(asset_path: str = None, graph_name: str = "EventGra
 
 def ue_build_blueprint_graph(asset_path: str = None, graph_name: str = "EventGraph",
                              graph_structure: dict = None) -> str:
-    """Builds a Blueprint graph from JSON adjacency list."""
+    """Builds a Blueprint graph from JSON adjacency list. graph_name accepts a collapsed-graph path (e.g. 'EventGraph/PrepareRefs')."""
     if asset_path is None:
         return json.dumps({"success": False, "message": "Required parameter 'asset_path' is missing."})
     if graph_structure is None:
@@ -313,7 +326,7 @@ def ue_set_component_property(asset_path: str = None, component_name: str = None
 
 def ue_set_blueprint_node_position(asset_path: str = None, graph_name: str = "EventGraph",
                                     node_name: str = None, pos_x: float = 0.0, pos_y: float = 0.0) -> str:
-    """Sets the canvas position of a node in a Blueprint graph."""
+    """Sets the canvas position of a node in a Blueprint graph. graph_name accepts a collapsed-graph path (e.g. 'EventGraph/PrepareRefs')."""
     if asset_path is None:
         return json.dumps({"success": False, "message": "Required parameter 'asset_path' is missing."})
     if node_name is None:
@@ -329,7 +342,7 @@ def ue_set_blueprint_node_position(asset_path: str = None, graph_name: str = "Ev
 
 def ue_auto_layout_graph(asset_path: str = None, graph_name: str = "EventGraph",
                           x_step: float = 380.0, y_step: float = 200.0) -> str:
-    """Auto-lays out all nodes in a Blueprint graph using DAG topological sort."""
+    """Auto-lays out all nodes in a Blueprint graph using DAG topological sort. graph_name accepts a collapsed-graph path (e.g. 'EventGraph/PrepareRefs')."""
     if asset_path is None:
         return json.dumps({"success": False, "message": "Required parameter 'asset_path' is missing."})
     try:
