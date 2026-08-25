@@ -228,6 +228,15 @@ def ue_create_flat_landscape(size_uu: float = None, material_path: str = None,
 
 # ─── sculpt ───────────────────────────────────────────────────────────────────────
 
+def _parse_sides(sides):
+    """'north,west' -> set; raises ValueError on an unknown side name."""
+    wanted = {s.strip().lower() for s in str(sides).split(',') if s.strip()}
+    unknown = wanted - {"north", "south", "east", "west"}
+    if unknown:
+        raise ValueError(f"Unknown side(s) {sorted(unknown)}; valid: north, south, east, west.")
+    return wanted
+
+
 def ue_sculpt_border_mountains(landscape_label: str = None,
                                ridge_distance_uu: float = 1200.0,
                                ridge_half_width_uu: float = 1200.0,
@@ -240,8 +249,15 @@ def ue_sculpt_border_mountains(landscape_label: str = None,
                                ground_height_uu: float = 100.0,
                                seed: int = 20260818,
                                walkable_floor_angle: float = 44.76,
-                               margin_degrees: float = 8.0) -> str:
-    """Raises an irregular mountain chain along the landscape's four edges.
+                               margin_degrees: float = 8.0,
+                               sides: str = "north,south,east,west") -> str:
+    """Raises an irregular mountain chain along the landscape's edges (all four by default).
+
+    sides picks which edges get a chain ('north,east,west' leaves the south open — an ocean
+    side, a passage). West = min X, East = max X, South = min Y, North = max Y, the same
+    compass measure_borders uses. A disabled edge stays flat ground; whatever contains the
+    player there (water collision, a blocking volume) is the caller's job, and escape_test
+    accepts the same sides value so the open edge is not counted as a breach.
 
     Sculpt BEFORE scattering: heights are absolute and rewrite the interior flat, so props
     placed earlier end up buried or floating. Defaults are calibrated by measurement of a
@@ -271,6 +287,13 @@ def ue_sculpt_border_mountains(landscape_label: str = None,
         if err:
             return json.dumps({"success": False, "message": err})
 
+        try:
+            wanted = _parse_sides(sides)
+        except ValueError as ve:
+            return json.dumps({"success": False, "message": str(ve)})
+        if not wanted:
+            return json.dumps({"success": False, "message": "sides is empty; name at least one edge."})
+
         if min_peak_height_uu is None:
             min_peak_height_uu = _min_peak_for_angle(
                 float(walkable_floor_angle) + float(margin_degrees), float(ridge_half_width_uu))
@@ -278,17 +301,23 @@ def ue_sculpt_border_mountains(landscape_label: str = None,
         msg = unreal.MCPythonHelper.sculpt_border_mountains(
             ls, ridge_distance_uu, ridge_half_width_uu, peak_height_uu, height_variation_uu,
             min_peak_height_uu, ridge_wander_uu, noise_wavelength_uu, roughness_uu,
-            ground_height_uu, seed)
+            ground_height_uu, seed,
+            "west" in wanted, "east" in wanted, "south" in wanted, "north" in wanted)
         if msg:
             return json.dumps({"success": False, "message": msg})
 
+        open_sides = sorted({"north", "south", "east", "west"} - wanted)
         return json.dumps({
             "success": True,
+            "sides": sorted(wanted),
+            "open_sides": open_sides,
             "zone_uu": ridge_distance_uu + ridge_wander_uu + ridge_half_width_uu,
             "min_peak_height_uu": round(min_peak_height_uu, 1),
             "guaranteed_min_angle": round(math.degrees(math.atan(
                 min_peak_height_uu * math.pi / (2.0 * ridge_half_width_uu))), 1),
-            "message": "Sculpted. Run escape_test after rebuild_navigation — mean height proves nothing about a gap.",
+            "message": ("Sculpted. Run escape_test (same sides) after rebuild_navigation — mean height "
+                        "proves nothing about a gap." + (" Open side(s) %s need their own containment."
+                                                         % open_sides if open_sides else "")),
         })
     except Exception as e:
         return json.dumps({"success": False, "message": str(e), "traceback": traceback.format_exc()})
@@ -735,8 +764,13 @@ def ue_measure_borders(size_uu: float = None, samples_per_side: int = 41,
 
 def ue_escape_test(size_uu: float = None, outside_distance_uu: float = 300.0,
                    step_uu: float = 600.0, escape_tolerance_uu: float = 300.0,
-                   landscape_label: str = None, out_json_path: str = None) -> str:
+                   landscape_label: str = None, out_json_path: str = None,
+                   sides: str = "north,south,east,west") -> str:
     """Answers the question that matters: is there a navigable route out of the map?
+
+    sides restricts the test to the edges that are SUPPOSED to be sealed — pass the same
+    value given to sculpt_border_mountains, so a deliberately open edge (an ocean side with
+    its own containment) is not reported as a breach.
 
     Mean border height proves nothing about a gap. This asks the navigation system for a
     path from the map's centre to points in the OUTER band beyond the mountains; any
@@ -762,13 +796,24 @@ def ue_escape_test(size_uu: float = None, outside_distance_uu: float = 300.0,
         size = float(size_uu)
         center = unreal.Vector(x0 + size / 2.0, y0 + size / 2.0, 200.0)
 
+        try:
+            wanted = _parse_sides(sides)
+        except ValueError as ve:
+            return json.dumps({"success": False, "message": str(ve)})
+        if not wanted:
+            return json.dumps({"success": False, "message": "sides is empty; name at least one edge."})
+
         targets = []
         along = step_uu
         while along < size - step_uu:
-            targets.append((x0 + along, y0 + outside_distance_uu))
-            targets.append((x0 + along, y0 + size - outside_distance_uu))
-            targets.append((x0 + outside_distance_uu, y0 + along))
-            targets.append((x0 + size - outside_distance_uu, y0 + along))
+            if "south" in wanted:
+                targets.append((x0 + along, y0 + outside_distance_uu))
+            if "north" in wanted:
+                targets.append((x0 + along, y0 + size - outside_distance_uu))
+            if "west" in wanted:
+                targets.append((x0 + outside_distance_uu, y0 + along))
+            if "east" in wanted:
+                targets.append((x0 + size - outside_distance_uu, y0 + along))
             along += step_uu
 
         escapes, partials, tested = [], 0, 0
@@ -807,7 +852,8 @@ def ue_escape_test(size_uu: float = None, outside_distance_uu: float = 300.0,
         except Exception:
             pass
 
-        res = {"success": True, "targets_tested": tested, "escapes": len(escapes),
+        res = {"success": True, "tested_sides": sorted(wanted),
+               "targets_tested": tested, "escapes": len(escapes),
                "partial_paths": partials, "escape_examples": escapes[:10],
                "agent_max_slope": agent_max_slope,
                "message": ("0 escapes: the ring is sealed for the navmesh agent (not the actual "
