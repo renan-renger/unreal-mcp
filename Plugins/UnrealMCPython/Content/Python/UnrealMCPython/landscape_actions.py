@@ -323,6 +323,48 @@ def ue_sculpt_border_mountains(landscape_label: str = None,
         return json.dumps({"success": False, "message": str(e), "traceback": traceback.format_exc()})
 
 
+def ue_sculpt_rect_region(landscape_label: str = None,
+                          min_x_uu: float = None, min_y_uu: float = None,
+                          max_x_uu: float = None, max_y_uu: float = None,
+                          height_uu: float = None, falloff_uu: float = 800.0) -> str:
+    """Pushes a rectangular region to a target height, blending smoothly into the terrain.
+
+    Coordinates are landscape-local uu from the minimum corner (the same space every other
+    action uses). Unlike sculpt_border_mountains this is a LOCAL edit — it reads the
+    existing heights and blends against them over falloff_uu (smoothstep), so it stacks
+    with the border chain and with itself. What it is for: sinking an ocean bed below the
+    beach so water meets the sand at a real shoreline, a wading pool a few tens of uu
+    below its water plane, a raised plateau. Sculpt regions BEFORE scattering — props
+    placed by trace end up buried or floating when the terrain moves under them.
+    """
+    missing = _helper_missing()
+    if missing:
+        return missing
+    if not landscape_label:
+        return json.dumps({"success": False, "message": "Required parameter 'landscape_label' is missing."})
+    for name, val in (("min_x_uu", min_x_uu), ("min_y_uu", min_y_uu),
+                      ("max_x_uu", max_x_uu), ("max_y_uu", max_y_uu), ("height_uu", height_uu)):
+        if val is None:
+            return json.dumps({"success": False, "message": f"Required parameter '{name}' is missing."})
+    try:
+        ls, err = _find_landscape(landscape_label)
+        if err:
+            return json.dumps({"success": False, "message": err})
+        msg = unreal.MCPythonHelper.sculpt_rect_region(
+            ls, float(min_x_uu), float(min_y_uu), float(max_x_uu), float(max_y_uu),
+            float(height_uu), float(falloff_uu))
+        if msg:
+            return json.dumps({"success": False, "message": msg})
+        return json.dumps({
+            "success": True,
+            "region": [float(min_x_uu), float(min_y_uu), float(max_x_uu), float(max_y_uu)],
+            "height_uu": float(height_uu), "falloff_uu": float(falloff_uu),
+            "message": "Region sculpted. Verify by tracing a point inside it; re-scatter anything the ground moved under.",
+        })
+    except Exception as e:
+        return json.dumps({"success": False, "message": str(e), "traceback": traceback.format_exc()})
+
+
 # ─── paint ────────────────────────────────────────────────────────────────────────
 
 def ue_paint_by_slope(landscape_label: str = None, package_path: str = None,

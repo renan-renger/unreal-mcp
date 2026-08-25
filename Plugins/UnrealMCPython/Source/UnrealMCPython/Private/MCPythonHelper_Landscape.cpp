@@ -327,6 +327,114 @@ FString UMCPythonHelper::SculptBorderMountains(
 	return FString();
 }
 
+FString UMCPythonHelper::SculptRectRegion(
+	ALandscape* Landscape,
+	float MinXUU,
+	float MinYUU,
+	float MaxXUU,
+	float MaxYUU,
+	float TargetHeightUU,
+	float FalloffUU)
+{
+	if (Landscape == nullptr)
+	{
+		return TEXT("Landscape is null.");
+	}
+
+	if (MaxXUU <= MinXUU || MaxYUU <= MinYUU)
+	{
+		return FString::Printf(TEXT("Region is empty: (%.0f..%.0f) x (%.0f..%.0f)."), MinXUU, MaxXUU, MinYUU, MaxYUU);
+	}
+
+	if (FalloffUU <= 0.0f)
+	{
+		return FString::Printf(TEXT("FalloffUU must be positive; got %.1f."), FalloffUU);
+	}
+
+	ULandscapeInfo* Info = Landscape->GetLandscapeInfo();
+	if (Info == nullptr)
+	{
+		return TEXT("Landscape has no ULandscapeInfo; it may not be fully registered yet.");
+	}
+
+	int32 MinX = 0, MinY = 0, MaxX = 0, MaxY = 0;
+	if (!Info->GetLandscapeExtent(MinX, MinY, MaxX, MaxY))
+	{
+		return TEXT("GetLandscapeExtent failed; the landscape has no components.");
+	}
+
+	const FVector Scale = Landscape->GetActorScale3D();
+	if (Scale.X <= 0.0 || Scale.Y <= 0.0 || FMath::IsNearlyZero(Scale.Z))
+	{
+		return TEXT("Landscape scale must have positive X and Y and a non-zero Z.");
+	}
+
+	const int32 VertsX = MaxX - MinX + 1;
+	const int32 VertsY = MaxY - MinY + 1;
+
+	const ULandscapeEditLayerBase* EditLayer = Landscape->GetEditLayerConst(0);
+	TUniquePtr<FLandscapeEditDataInterface> LandscapeEdit =
+		(EditLayer != nullptr)
+			? MakeUnique<FLandscapeEditDataInterface>(Info, EditLayer->GetGuid())
+			: MakeUnique<FLandscapeEditDataInterface>(Info);
+
+	// Blend against what is there, unlike SculptBorderMountains: this is a local edit, so it
+	// must read the existing heights first rather than assume a flat interior.
+	TArray<uint16> Heights;
+	Heights.SetNumZeroed(VertsX * VertsY);
+	LandscapeEdit->GetHeightDataFast(MinX, MinY, MaxX, MaxY, Heights.GetData(), 0);
+
+	const double TargetLocal = TargetHeightUU / Scale.Z;
+	const double TargetRaw = FMath::Clamp(32768.0 + TargetLocal * 128.0, 0.0, 65535.0);
+
+	bool bTouched = false;
+	for (int32 Y = 0; Y < VertsY; ++Y)
+	{
+		const double WorldY = Y * Scale.Y;
+		// Distance outside the rect along each axis; 0 inside.
+		const double DY = FMath::Max3(MinYUU - WorldY, WorldY - MaxYUU, 0.0);
+
+		for (int32 X = 0; X < VertsX; ++X)
+		{
+			const double WorldX = X * Scale.X;
+			const double DX = FMath::Max3(MinXUU - WorldX, WorldX - MaxXUU, 0.0);
+
+			const double Dist = FMath::Sqrt(DX * DX + DY * DY);
+			if (Dist >= FalloffUU)
+			{
+				continue;
+			}
+
+			// Smoothstep from full effect inside the rect to none at the falloff's edge —
+			// a hard step here reads as a machined trench wall from any angle.
+			const double T = 1.0 - Dist / FalloffUU;
+			const double Blend = T * T * (3.0 - 2.0 * T);
+
+			const int32 Idx = Y * VertsX + X;
+			const double NewRaw = FMath::Lerp(static_cast<double>(Heights[Idx]), TargetRaw, Blend);
+			Heights[Idx] = static_cast<uint16>(FMath::Clamp(FMath::RoundToDouble(NewRaw), 0.0, 65535.0));
+			bTouched = true;
+		}
+	}
+
+	if (!bTouched)
+	{
+		return TEXT("The region (plus falloff) does not overlap the landscape.");
+	}
+
+	LandscapeEdit->SetHeightData(MinX, MinY, MaxX, MaxY, Heights.GetData(), 0, /*InCalcNormals=*/true);
+	LandscapeEdit->Flush();
+
+	if (EditLayer != nullptr)
+	{
+		Landscape->ForceLayersFullUpdate();
+	}
+
+	Landscape->RecreateCollisionComponents();
+
+	return FString();
+}
+
 ULandscapeLayerInfoObject* UMCPythonHelper::FindOrCreateLandscapeLayerInfo(
 	const FString& PackagePath,
 	FName LayerName,

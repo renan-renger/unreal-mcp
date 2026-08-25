@@ -671,6 +671,10 @@ CATALOG = {
             'params': "landscape_label, ridge_distance_uu=1200.0, ridge_half_width_uu=1200.0, peak_height_uu=3500.0, height_variation_uu=4000.0, min_peak_height_uu, ridge_wander_uu=5000.0, noise_wavelength_uu=3000.0, roughness_uu=400.0, ground_height_uu=100.0, seed=20260818, walkable_floor_angle=44.76, margin_degrees=8.0, sides='north,south,east,west'",
             'doc': "Raises an irregular mountain chain along the landscape's edges (all four by default).",
         },
+        'sculpt_rect_region': {
+            'params': 'landscape_label, min_x_uu, min_y_uu, max_x_uu, max_y_uu, height_uu, falloff_uu=800.0',
+            'doc': 'Pushes a rectangular region to a target height, blending smoothly into the terrain.',
+        },
         'solve_landscape_geometry': {
             'params': 'size_uu, quad_size=25.0',
             'doc': 'Resolves a requested size to the closest valid landscape geometry (read-only).',

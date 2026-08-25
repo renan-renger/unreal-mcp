@@ -440,6 +440,24 @@ public:
         bool bSouthEdge = true,
         bool bNorthEdge = true);
 
+    /** Push a rectangular region of the landscape to TargetHeightUU (world uu above the
+     *  landscape actor's Z), blending smoothly into the surrounding terrain over FalloffUU.
+     *  Coordinates are landscape-local uu from the minimum corner — the same space
+     *  CreateFlatLandscape positions in. Unlike SculptBorderMountains this is a LOCAL edit:
+     *  it reads the existing heights and blends against them, so it stacks with the border
+     *  chain and with itself (an ocean bed, a sunken pool, a raised plateau). Uses
+     *  smoothstep falloff — a hard edge reads as a machined trench from any angle.
+     *  Returns empty string on success, else the reason. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static FString SculptRectRegion(
+        ALandscape* Landscape,
+        float MinXUU,
+        float MinYUU,
+        float MaxXUU,
+        float MaxYUU,
+        float TargetHeightUU,
+        float FalloffUU);
+
     /** Find or create the ULandscapeLayerInfoObject a paint layer needs, at
      *  <PackagePath>/LI_<LayerName>. A landscape material's paint layers are only names until
      *  each is bound to a layer info asset — without it the layer cannot hold weight data and a
