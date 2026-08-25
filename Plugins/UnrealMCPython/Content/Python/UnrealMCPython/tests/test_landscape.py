@@ -107,6 +107,21 @@ class TestLandscapeActions(MCPTestCase):
                       landscape_label=label, **_SCULPT)
         self.assertSuccess(r)
 
+        # Region sculpt: sink a pool in the interior and prove the ground moved.
+        self.assertFalse(self.call("landscape_actions", "ue_sculpt_rect_region",
+                                   landscape_label=label).get("success"))
+        r = self.call("landscape_actions", "ue_sculpt_rect_region",
+                      landscape_label=label, min_x_uu=2400.0, min_y_uu=2400.0,
+                      max_x_uu=3900.0, max_y_uu=3900.0, height_uu=-150.0, falloff_uu=500.0)
+        self.assertSuccess(r)
+        hit = unreal.SystemLibrary.line_trace_single(
+            unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world(),
+            unreal.Vector(200000.0 + 3150.0, 200000.0 + 3150.0, 5000.0),
+            unreal.Vector(200000.0 + 3150.0, 200000.0 + 3150.0, -5000.0),
+            unreal.TraceTypeQuery.ECC_VISIBILITY, True, [], unreal.DrawDebugTrace.NONE, True)
+        self.assertIsNotNone(hit)
+        self.assertLess(hit.to_tuple()[5].z, -100.0)  # pool floor near -150, well below ground 50
+
         r = self.call("landscape_actions", "ue_paint_by_slope",
                       landscape_label=label, package_path=TEST_ROOT,
                       flat_layer_name="TestFlat", slope_layer_name="TestSlope",
