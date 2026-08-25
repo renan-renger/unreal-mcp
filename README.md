@@ -30,7 +30,7 @@
 
 Unreal MCP connects AI assistants to the Unreal Editor through the [Model Context Protocol](https://modelcontextprotocol.io/). Spawn actors, build Blueprint graphs, construct Behavior Trees, design UMG widgets, edit materials, author cinematics — all from natural language.
 
-**279 actions across 22 domains**, plus `execute_python` as an escape hatch — run any BlueprintCallable function or editor subsystem the engine exposes to Python, on the fly.
+**291 actions across 23 domains**, plus `execute_python` as an escape hatch — run any BlueprintCallable function or editor subsystem the engine exposes to Python, on the fly.
 
 **Easy to extend.** Adding an action is a Python function plus a catalog regen — no C++ and no editor rebuild on the Python path. When you need something Python doesn't expose (e.g. reference-skeleton bones), an optional C++ helper layer is there too. See [CLAUDE.md](CLAUDE.md) for the step-by-step workflow.
 
@@ -44,7 +44,7 @@ Unreal MCP connects AI assistants to the Unreal Editor through the [Model Contex
 
 ## Features
 
-Each row is one **namespace tool**. The action set is large but the tool list stays small, so it never bloats the model's context. **279 actions across 22 domains.**
+Each row is one **namespace tool**. The action set is large but the tool list stays small, so it never bloats the model's context. **291 actions across 23 domains.**
 
 | Domain | Capabilities | Actions |
 |---|---|:---:|
@@ -58,6 +58,7 @@ Each row is one **namespace tool**. The action set is large but the tool list st
 | **umg** | Create Widget Blueprints, add/remove widgets, reparent/wrap/replace, properties, slot layout, text style, event binding, compile. | 15 |
 | **level_sequence** | Create cinematics, camera with Camera Cut track, spawnable/possessable bindings, transform & skeletal-anim tracks, keyframes, Sequencer open/close. | 13 |
 | **behavior_tree** | Create & read Behavior Trees, Blackboard keys, build complete BT hierarchies. | 12 |
+| **landscape** | Scripted map building: create flat landscapes (geometry solver), sculpt irregular border-mountain rings, slope-based layer painting, HISM prop scatter, level skeleton (light/sky/nav), navigation rebuild, border/escape/budget verification. (C++-backed) | 12 |
 | **editor** | Selection, material/mesh replacement, Blueprint-based replacement, actor merge/join, Proxy Geometry baking, asset-editor open/get/close. | 12 |
 | **static_mesh** | Mesh info (LODs/tris/verts), LOD generation & reuse, materials, collision (simple/convex/per-LOD). | 12 |
 | **gas** | Gameplay Ability System: Ability/Effect Blueprint authoring, effect modifiers, costs & cooldowns, gameplay tags. | 11 |
@@ -228,7 +229,7 @@ Add the server to your MCP client config:
 
 1. Restart your MCP client
 2. The MCP server starts automatically
-3. Verify — you should see the 22 Unreal-MCPython domain tools listed in your client
+3. Verify — you should see the 23 Unreal-MCPython domain tools listed in your client
 
 ## Usage
 
@@ -324,6 +325,13 @@ Pass any action below to its domain tool. Use `{ "action": "list_actions" }` on 
 <summary><strong>editor</strong> (12)</summary>
 
 `close_asset_editor` · `create_proxy_actor` · `get_open_assets` · `get_selected_assets` · `join_actors` · `merge_actors` · `open_editor_for_asset` · `replace_mesh_on_selected` · `replace_mesh_on_specified` · `replace_mtl_on_selected` · `replace_mtl_on_specified` · `replace_selected_with_bp`
+
+</details>
+
+<details>
+<summary><strong>landscape</strong> (12)</summary>
+
+`border_weak_points` · `build_level_skeleton` · `create_flat_landscape` · `escape_test` · `get_mesh_footprint` · `level_budget_report` · `measure_borders` · `paint_by_slope` · `rebuild_navigation` · `scatter_hism` · `sculpt_border_mountains` · `solve_landscape_geometry`
 
 </details>
 
