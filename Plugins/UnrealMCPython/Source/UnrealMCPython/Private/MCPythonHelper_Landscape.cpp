@@ -143,11 +143,20 @@ FString UMCPythonHelper::SculptBorderMountains(
 	float NoiseWavelengthUU,
 	float RoughnessUU,
 	float GroundHeightUU,
-	int32 Seed)
+	int32 Seed,
+	bool bWestEdge,
+	bool bEastEdge,
+	bool bSouthEdge,
+	bool bNorthEdge)
 {
 	if (Landscape == nullptr)
 	{
 		return TEXT("Landscape is null.");
+	}
+
+	if (!bWestEdge && !bEastEdge && !bSouthEdge && !bNorthEdge)
+	{
+		return TEXT("All four edges are disabled; there is nothing to sculpt.");
 	}
 
 	if (RidgeHalfWidthUU <= 0.0f)
@@ -234,17 +243,25 @@ FString UMCPythonHelper::SculptBorderMountains(
 	TArray<uint16> Heights;
 	Heights.SetNumUninitialized(VertsX * VertsY);
 
+	// A disabled edge contributes an infinite distance, so its side of the map stays flat
+	// ground and the chains of the enabled edges still meet cleanly at shared corners.
+	const double Far = TNumericLimits<double>::Max();
+
 	for (int32 Y = 0; Y < VertsY; ++Y)
 	{
 		const double WorldY = Y * Scale.Y;
-		const double DistY = FMath::Min(Y, VertsY - 1 - Y) * Scale.Y;
+		const double DistY = FMath::Min(
+			bSouthEdge ? Y * Scale.Y : Far,
+			bNorthEdge ? (VertsY - 1 - Y) * Scale.Y : Far);
 
 		for (int32 X = 0; X < VertsX; ++X)
 		{
 			const double WorldX = X * Scale.X;
-			const double DistX = FMath::Min(X, VertsX - 1 - X) * Scale.X;
+			const double DistX = FMath::Min(
+				bWestEdge ? X * Scale.X : Far,
+				bEastEdge ? (VertsX - 1 - X) * Scale.X : Far);
 
-			// Nearest edge, so the four chains meet at the corners instead of crossing.
+			// Nearest enabled edge, so the chains meet at the corners instead of crossing.
 			const double Dist = FMath::Min(DistX, DistY);
 
 			double HeightUU = GroundHeightUU;

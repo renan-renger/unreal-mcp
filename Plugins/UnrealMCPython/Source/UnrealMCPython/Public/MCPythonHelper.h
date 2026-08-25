@@ -416,7 +416,12 @@ public:
      *
      *  Same Seed, same mountains. Returns empty string on success, else the reason —
      *  deliberately NOT bool + out-param, which the Python binding turns into "-> str or None"
-     *  and swallows the message exactly when it is needed. On failure the landscape is untouched. */
+     *  and swallows the message exactly when it is needed. On failure the landscape is untouched.
+     *
+     *  The four edge flags choose which sides get a chain (west = min X, east = max X,
+     *  south = min Y, north = max Y — the same compass measure_borders uses). A disabled edge
+     *  stays flat ground: an open ocean side, a passage into a neighbouring area. At least one
+     *  edge must be enabled. The interior is rewritten flat either way. */
     UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
     static FString SculptBorderMountains(
         ALandscape* Landscape,
@@ -429,7 +434,11 @@ public:
         float NoiseWavelengthUU,
         float RoughnessUU,
         float GroundHeightUU,
-        int32 Seed);
+        int32 Seed,
+        bool bWestEdge = true,
+        bool bEastEdge = true,
+        bool bSouthEdge = true,
+        bool bNorthEdge = true);
 
     /** Find or create the ULandscapeLayerInfoObject a paint layer needs, at
      *  <PackagePath>/LI_<LayerName>. A landscape material's paint layers are only names until

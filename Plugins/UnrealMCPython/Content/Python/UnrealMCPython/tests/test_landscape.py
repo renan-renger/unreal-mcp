@@ -94,6 +94,19 @@ class TestLandscapeActions(MCPTestCase):
                       landscape_label=label, **dict(_SCULPT, min_peak_height_uu=2000.0))
         self.assertFalse(r.get("success"))
 
+        # Unknown side names are refused; a partial ring reports its open sides.
+        r = self.call("landscape_actions", "ue_sculpt_border_mountains",
+                      landscape_label=label, sides="north,upward", **_SCULPT)
+        self.assertFalse(r.get("success"))
+        r = self.call("landscape_actions", "ue_sculpt_border_mountains",
+                      landscape_label=label, sides="north,east,west", **_SCULPT)
+        self.assertSuccess(r)
+        self.assertEqual(r["open_sides"], ["south"])
+        # restore the full ring for the measurements below (heights are absolute)
+        r = self.call("landscape_actions", "ue_sculpt_border_mountains",
+                      landscape_label=label, **_SCULPT)
+        self.assertSuccess(r)
+
         r = self.call("landscape_actions", "ue_paint_by_slope",
                       landscape_label=label, package_path=TEST_ROOT,
                       flat_layer_name="TestFlat", slope_layer_name="TestSlope",

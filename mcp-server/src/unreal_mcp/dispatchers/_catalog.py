@@ -640,7 +640,7 @@ CATALOG = {
             'doc': 'Creates a flat landscape in the open level, resolving size_uu to valid geometry.',
         },
         'escape_test': {
-            'params': 'size_uu, outside_distance_uu=300.0, step_uu=600.0, escape_tolerance_uu=300.0, landscape_label, out_json_path',
+            'params': "size_uu, outside_distance_uu=300.0, step_uu=600.0, escape_tolerance_uu=300.0, landscape_label, out_json_path, sides='north,south,east,west'",
             'doc': 'Answers the question that matters: is there a navigable route out of the map?',
         },
         'get_mesh_footprint': {
@@ -668,8 +668,8 @@ CATALOG = {
             'doc': 'Scatters static meshes over the landscape as HISM instances, one actor per species.',
         },
         'sculpt_border_mountains': {
-            'params': 'landscape_label, ridge_distance_uu=1200.0, ridge_half_width_uu=1200.0, peak_height_uu=3500.0, height_variation_uu=4000.0, min_peak_height_uu, ridge_wander_uu=5000.0, noise_wavelength_uu=3000.0, roughness_uu=400.0, ground_height_uu=100.0, seed=20260818, walkable_floor_angle=44.76, margin_degrees=8.0',
-            'doc': "Raises an irregular mountain chain along the landscape's four edges.",
+            'params': "landscape_label, ridge_distance_uu=1200.0, ridge_half_width_uu=1200.0, peak_height_uu=3500.0, height_variation_uu=4000.0, min_peak_height_uu, ridge_wander_uu=5000.0, noise_wavelength_uu=3000.0, roughness_uu=400.0, ground_height_uu=100.0, seed=20260818, walkable_floor_angle=44.76, margin_degrees=8.0, sides='north,south,east,west'",
+            'doc': "Raises an irregular mountain chain along the landscape's edges (all four by default).",
         },
         'solve_landscape_geometry': {
             'params': 'size_uu, quad_size=25.0',
