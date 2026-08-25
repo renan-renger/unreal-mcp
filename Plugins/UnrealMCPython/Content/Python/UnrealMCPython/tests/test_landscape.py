@@ -89,6 +89,16 @@ class TestLandscapeActions(MCPTestCase):
         self.assertGreater(r["min_peak_height_uu"], 0)
         self.assertGreater(r["guaranteed_min_angle"], 44.76)
 
+        # Collision components must generate overlap events, or anything that lands by
+        # overlap (loot ground-checks, pickups) falls straight through the terrain.
+        ls = next(a for a in self._sub.get_all_level_actors()
+                  if isinstance(a, unreal.Landscape) and a.get_actor_label() == label)
+        comps = ls.get_components_by_class(unreal.LandscapeHeightfieldCollisionComponent)
+        self.assertTrue(len(comps) > 0)
+        for c in comps:
+            self.assertTrue(c.get_editor_property("generate_overlap_events"),
+                            "heightfield collision without overlap events — loot falls through")
+
         # Floor above the mean must be refused - it would erase the noise entirely.
         r = self.call("landscape_actions", "ue_sculpt_border_mountains",
                       landscape_label=label, **dict(_SCULPT, min_peak_height_uu=2000.0))
