@@ -57,6 +57,7 @@ DOMAINS = [
     "editor",
     "game",
     "gas",
+    "landscape",
     "layer",
     "level",
     "level_sequence",

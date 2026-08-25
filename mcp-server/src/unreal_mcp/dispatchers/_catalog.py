@@ -626,6 +626,56 @@ CATALOG = {
             'doc': "Changes a GameplayEffect's duration policy (instant / has_duration+seconds / infinite) (requires the GameplayAbilities plugin).",
         },
     },
+    'landscape': {
+        'border_weak_points': {
+            'params': 'size_uu, step_along_uu=1200.0, step_d_uu=200.0, max_d_uu=6000.0, walkable_floor_angle=44.76, landscape_label, out_json_path',
+            'doc': 'Ranks border profiles by how easy they are to climb (complements escape_test).',
+        },
+        'build_level_skeleton': {
+            'params': 'size_uu, origin_x=0.0, origin_y=0.0, game_mode_path, extra_actor_class_paths, sun_roll=-40.439, sun_pitch=-49.709, sun_yaw=132.705, sun_intensity=2.0, sun_temperature=8786.4, sky_intensity=2.0, nav_bounds_margin_uu=4600.0, nav_bounds_height_uu=2000.0, spawn_player_start=True, spawn_post_process=True, spawn_sky=True',
+            'doc': 'Spawns the structural actors a playable level needs: light, sky, nav bounds, PlayerStart.',
+        },
+        'create_flat_landscape': {
+            'params': 'size_uu, material_path, scale_x=25.0, scale_y=25.0, scale_z=100.0, location_x=0.0, location_y=0.0, location_z=0.0, quads_per_section, sections_per_component, component_count_x, component_count_y',
+            'doc': 'Creates a flat landscape in the open level, resolving size_uu to valid geometry.',
+        },
+        'escape_test': {
+            'params': 'size_uu, outside_distance_uu=300.0, step_uu=600.0, escape_tolerance_uu=300.0, landscape_label, out_json_path',
+            'doc': 'Answers the question that matters: is there a navigable route out of the map?',
+        },
+        'get_mesh_footprint': {
+            'params': 'mesh_path',
+            'doc': "Measures a static mesh's canopy radius and height, for scatter spacing (read-only).",
+        },
+        'level_budget_report': {
+            'params': 'max_actors=500, max_landscape_components=1024, max_instances=20000',
+            'doc': 'Counts level actors, landscape components and mesh instances against budget limits.',
+        },
+        'measure_borders': {
+            'params': 'size_uu, samples_per_side=41, landscape_label, out_json_path',
+            'doc': 'Measures the border mountains: per-side peak mean/deviation/range and interior ground.',
+        },
+        'paint_by_slope': {
+            'params': 'landscape_label, package_path, flat_layer_name, slope_layer_name, slope_start_degrees=25.0, slope_full_degrees=45.0, save_layer_assets=False',
+            'doc': 'Creates layer info assets and paints two landscape layers by terrain steepness.',
+        },
+        'rebuild_navigation': {
+            'params': '',
+            'doc': 'Rebuilds navigation for the open level (required for script-built levels).',
+        },
+        'scatter_hism': {
+            'params': 'specs, size_uu, landscape_label, margin_uu=1000.0, seed=20260818, max_slope_degrees=20.0, scale_jitter_min=0.85, scale_jitter_max=1.15, tries_per_item=60, replace_existing=True',
+            'doc': 'Scatters static meshes over the landscape as HISM instances, one actor per species.',
+        },
+        'sculpt_border_mountains': {
+            'params': 'landscape_label, ridge_distance_uu=1200.0, ridge_half_width_uu=1200.0, peak_height_uu=3500.0, height_variation_uu=4000.0, min_peak_height_uu, ridge_wander_uu=5000.0, noise_wavelength_uu=3000.0, roughness_uu=400.0, ground_height_uu=100.0, seed=20260818, walkable_floor_angle=44.76, margin_degrees=8.0',
+            'doc': "Raises an irregular mountain chain along the landscape's four edges.",
+        },
+        'solve_landscape_geometry': {
+            'params': 'size_uu, quad_size=25.0',
+            'doc': 'Resolves a requested size to the closest valid landscape geometry (read-only).',
+        },
+    },
     'layer': {
         'add_actor_to_layer': {
             'params': 'actor_label, layer_name',
