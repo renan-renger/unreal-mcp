@@ -58,6 +58,13 @@ public class UnrealMCPython : ModuleRules
 				"UMGEditor",
 				"AnimGraph",
 				"AnimGraphRuntime",
+				// Landscape helpers (MCPythonHelper_Landscape.cpp). Foliage is pulled in by
+				// engine headers, not by choice: LandscapeEdit.h includes InstancedFoliageActor.h.
+				// AssetRegistry is what makes a created ULandscapeLayerInfoObject appear in the
+				// content browser.
+				"Landscape",
+				"Foliage",
+				"AssetRegistry",
 			}
 			);
 

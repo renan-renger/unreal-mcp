@@ -10,6 +10,12 @@
 #include "Components/Widget.h"
 #include "MCPythonHelper.generated.h"
 
+class AActor;
+class ALandscape;
+class ULandscapeLayerInfoObject;
+class UMaterialInterface;
+class UStaticMesh;
+
 
 USTRUCT(BlueprintType)
 struct FMCPythonPinLinkInfo
@@ -361,6 +367,108 @@ public:
     /** Deproject a viewport pixel to a world location at the given distance along the view ray. Returns JSON. */
     UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
     static FString ScreenToWorld(float ScreenX, float ScreenY, float Distance);
+
+    // ─── Landscape / Level-build Helpers ──────────────────────────────────────────
+    //
+    // Landscape creation and heightmap/weightmap writing are public C++ but not
+    // UFUNCTIONs: unreal.Landscape exposes only landscape_import_heightmap_from_render_target
+    // and friends, all of which need a landscape that already has components — there is
+    // no Create/Import, and the render-target import is broken anyway (returns True and
+    // flattens the heightmap to zero; verified 2026-08-18 across RTF_RGBA16F/RGBA8/RGBA32F,
+    // both channel encodings, with an edit layer present and ForceLayersFullUpdate after).
+    // These wrap ALandscapeProxy::Import, FLandscapeEditDataInterface and AddTargetLayer.
+    //
+    // Ported from MadorasRebirth PR #1511 (UMadoraLevelBuildLibrary), where every default
+    // and every rule was measured against that project's hand-authored reference map.
+
+    /** Spawn a flat landscape (empty heightmap import). Location is the MINIMUM corner, not the
+     *  centre — that is what the actor stores and what reads back from get_actor_transform();
+     *  the Landscape mode panel treats its input as the centre and offsets before spawning.
+     *  QuadsPerSection must be 7/15/31/63/127/255 and SectionsPerComponent 1 or 2 (hard engine
+     *  constraints). Refuses grid-based (World Partition) worlds. Returns nullptr with OutError
+     *  set on failure; no actor is left behind. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static ALandscape* CreateFlatLandscape(
+        UObject* WorldContextObject,
+        FVector Location,
+        FVector Scale,
+        int32 QuadsPerSection,
+        int32 SectionsPerComponent,
+        int32 ComponentCountX,
+        int32 ComponentCountY,
+        UMaterialInterface* LandscapeMaterial,
+        FString& OutError);
+
+    /** Raise an irregular mountain chain along all four edges so a player cannot walk out.
+     *
+     *  Heights are ABSOLUTE, not additive: the interior is rewritten flat at GroundHeightUU,
+     *  so sculpt BEFORE scattering props — anything placed by a downward trace beforehand ends
+     *  up buried or floating. The shape is a narrow CREST (not a ramp): crest at
+     *  RidgeDistanceUU from the edge (wandering by noise * RidgeWanderUU), peak
+     *  PeakHeightUU + noise * HeightVariationUU, back at ground RidgeHalfWidthUU to each side.
+     *
+     *  What stops the player is slope, not height: tan(angle) = peak * PI / (2 * RidgeHalfWidthUU)
+     *  against the character's WalkableFloorAngle. MinPeakHeightUU is the floor the noise may not
+     *  dig below — it lifts only the troughs deep enough to open a gap, keeping the variation that
+     *  makes the range read as hand-made. Set it from the slope you need:
+     *  MinPeak = tan(angle) * 2 * RidgeHalfWidthUU / PI. A floor above PeakHeightUU is refused
+     *  (it would erase the noise entirely).
+     *
+     *  Same Seed, same mountains. Returns empty string on success, else the reason —
+     *  deliberately NOT bool + out-param, which the Python binding turns into "-> str or None"
+     *  and swallows the message exactly when it is needed. On failure the landscape is untouched. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static FString SculptBorderMountains(
+        ALandscape* Landscape,
+        float RidgeDistanceUU,
+        float RidgeHalfWidthUU,
+        float PeakHeightUU,
+        float HeightVariationUU,
+        float MinPeakHeightUU,
+        float RidgeWanderUU,
+        float NoiseWavelengthUU,
+        float RoughnessUU,
+        float GroundHeightUU,
+        int32 Seed);
+
+    /** Find or create the ULandscapeLayerInfoObject a paint layer needs, at
+     *  <PackagePath>/LI_<LayerName>. A landscape material's paint layers are only names until
+     *  each is bound to a layer info asset — without it the layer cannot hold weight data and a
+     *  LandscapeLayerBlend material renders as if every layer were empty. The layer names come
+     *  from the material's LandscapeLayerBlend node, not from taste. The asset is created but
+     *  NOT saved; save from the caller once painting has succeeded. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static ULandscapeLayerInfoObject* FindOrCreateLandscapeLayerInfo(
+        const FString& PackagePath,
+        FName LayerName,
+        FString& OutError);
+
+    /** Paint two layers by terrain steepness: FlatLayer on level ground, SlopeLayer on anything
+     *  steeper, blended between the two angles. Slope is measured from the height data itself
+     *  (central difference between neighbours). Registers both layers as target layers first —
+     *  SetAlphaData on an unregistered layer is accepted and silently discarded. Weights are
+     *  written to sum to 255 at every vertex; weight-blend layers that do not sum to full weight
+     *  render darker, which reads as a lighting bug rather than a painting one.
+     *  Returns empty string on success, else the reason. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static FString PaintLandscapeBySlope(
+        ALandscape* Landscape,
+        ULandscapeLayerInfoObject* FlatLayer,
+        ULandscapeLayerInfoObject* SlopeLayer,
+        float SlopeStartDegrees,
+        float SlopeFullDegrees);
+
+    /** Spawn a plain actor whose root is a HierarchicalInstancedStaticMeshComponent set to Mesh,
+     *  labelled Label. Exists because the Python binding cannot add a component to a level actor
+     *  (AActor.add_component_by_class is not exposed), which otherwise forces a per-project
+     *  Blueprint just to hold the component. Instances are then added from Python via
+     *  add_instance on the component. Returns nullptr with OutError set on failure. */
+    UFUNCTION(BlueprintCallable, Category="Editor|MCPython")
+    static AActor* SpawnHISMScatterActor(
+        UObject* WorldContextObject,
+        const FString& Label,
+        UStaticMesh* Mesh,
+        FString& OutError);
 
     // ─── Reflection access to script-hidden properties ────────────────────────────
     // A UPROPERTY() carrying neither EditAnywhere nor BlueprintReadOnly is invisible
