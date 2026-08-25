@@ -15,6 +15,7 @@
 #include "Landscape.h"
 #include "LandscapeEdit.h"
 #include "LandscapeEditLayer.h"
+#include "LandscapeHeightfieldCollisionComponent.h"
 #include "LandscapeInfo.h"
 #include "LandscapeLayerInfoObject.h"
 #include "LandscapeProxy.h"
@@ -22,6 +23,21 @@
 #include "Materials/MaterialInterface.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "UObject/Package.h"
+
+// Heightfield collision components created by Import/RecreateCollisionComponents come out
+// with bGenerateOverlapEvents FALSE, while hand-authored landscapes have it on. Anything
+// that lands by overlap — loot with a ground-check sphere, pickups, triggers — then falls
+// straight through a scripted landscape and dies at KillZ. Measured 2026-08-25: chest
+// runes fell through every generated map; all 64 collision components read False.
+static void EnableLandscapeOverlapEvents(ALandscapeProxy* Landscape)
+{
+	TArray<ULandscapeHeightfieldCollisionComponent*> CollisionComponents;
+	Landscape->GetComponents<ULandscapeHeightfieldCollisionComponent>(CollisionComponents);
+	for (ULandscapeHeightfieldCollisionComponent* Component : CollisionComponents)
+	{
+		Component->SetGenerateOverlapEvents(true);
+	}
+}
 
 ALandscape* UMCPythonHelper::CreateFlatLandscape(
 	UObject* WorldContextObject,
@@ -128,6 +144,7 @@ ALandscape* UMCPythonHelper::CreateFlatLandscape(
 	}
 
 	LandscapeInfo->UpdateLayerInfoMap(Landscape);
+	EnableLandscapeOverlapEvents(Landscape);
 
 	return Landscape;
 }
@@ -323,6 +340,7 @@ FString UMCPythonHelper::SculptBorderMountains(
 	// Collision is a separate representation from the rendered heightfield; without this the terrain
 	// looks right and the player still walks through the mountains.
 	Landscape->RecreateCollisionComponents();
+	EnableLandscapeOverlapEvents(Landscape);
 
 	return FString();
 }
@@ -431,6 +449,7 @@ FString UMCPythonHelper::SculptRectRegion(
 	}
 
 	Landscape->RecreateCollisionComponents();
+	EnableLandscapeOverlapEvents(Landscape);
 
 	return FString();
 }
